@@ -57,71 +57,107 @@ canvas:hover {
 .game-info {
     position: absolute; /* 使用绝对定位，使面板覆盖在画布上方 */
     top: 30px; /* 距离顶部30px（考虑游戏容器的内边距） */
-    left: 30px; /* 距离左侧30px（考虑游戏容器的内边距） */
-    width: 740px; /* 宽度与画布宽度匹配（800px - 60px边距） */
+    left: 20px; /* 距离左侧20px（考虑游戏容器的内边距） */
+    width: 900px; /* 宽度与画布宽度匹配 */
     display: flex; /* 使用flex布局 */
     justify-content: space-between; /* 两端对齐，使玩家信息分别显示在左右两侧 */
     z-index: 10; /* 设置z-index，确保面板显示在画布上方 */
-    background-color: rgba(30, 30, 30, 0.7); /* 设置半透明的深灰色背景 */
+    background-color: rgba(30, 30, 30, 0); /* 设置半透明的深灰色背景 */
     border-radius: 8px; /* 设置圆角边框 */
     padding: 10px; /* 添加内边距 */
-    border: 1px solid rgba(85, 85, 85, 0.7); /* 添加半透明的灰色边框 */
+    border: 0px solid rgba(85, 85, 85, 0.7); /* 添加半透明的灰色边框 */
 }
 
 /* 玩家信息样式 */
 /* 玩家1和玩家2信息的通用样式 */
 .player1, .player2 {
-    padding: 8px 12px; /* 添加内边距，使内容更加美观 */
-    border-radius: 8px; /* 设置圆角边框 */
+    padding: 6px 10px; /* 添加内边距，使内容更加美观 */
+    border-radius: 6px; /* 设置圆角边框 */
     transition: all 0.3s ease; /* 添加过渡效果 */
     background-color: rgba(40, 40, 40, 0.7); /* 设置半透明的深灰色背景 */
     border: 1px solid rgba(85, 85, 85, 0.7); /* 添加半透明的灰色边框 */
-    min-width: 130px; /* 设置最小宽度，确保信息显示完整 */
-    font-size: 12px; /* 设置字体大小 */
+    min-width: 110px; /* 设置最小宽度，确保信息显示完整 */
+    font-size: 11px; /* 设置字体大小 */
 }
 
 /* 玩家标题样式 */
 /* 玩家名称的样式 */
 .player1 h3, .player2 h3 {
-    font-size: 14px; /* 设置字体大小 */
-    margin-bottom: 5px; /* 设置底部边距，与下方内容保持距离 */
+    font-size: 13px; /* 设置字体大小 */
+    margin-bottom: 4px; /* 设置底部边距，与下方内容保持距离 */
 }
 
 /* 玩家信息文本样式 */
 /* 玩家生命值和分数的样式 */
 .player1 p, .player2 p {
-    font-size: 12px; /* 设置字体大小 */
-    margin: 3px 0; /* 设置上下边距，使信息行之间有适当的间距 */
+    font-size: 11px; /* 设置字体大小 */
+    margin: 2px 0; /* 设置上下边距，使信息行之间有适当的间距 */
 }
 
 /* 玩家1特有样式 */
 /* 玩家1的个性化样式 */
 .player1 {
     background-color: rgba(255, 107, 107, 0.1); /* 设置红色调的半透明背景 */
-    border-left: 4px solid #ff6b6b; /* 添加红色左侧边框，作为玩家1的标识 */
+    border-left: 3px solid #ff6b6b; /* 添加红色左侧边框，作为玩家1的标识 */
     position: absolute; /* 使用绝对定位 */
     left: 10px; /* 距离左侧10px */
     top: 0; /* 距离顶部0px */
-    max-width: 150px; /* 设置最大宽度，避免信息面板过宽 */
+    max-width: 130px; /* 设置最大宽度，避免信息面板过宽 */
 }
 
 /* 玩家2特有样式 */
 /* 玩家2的个性化样式 */
 .player2 {
     background-color: rgba(69, 183, 209, 0.1); /* 设置蓝色调的半透明背景 */
-    border-right: 4px solid #45b7d1; /* 添加蓝色右侧边框，作为玩家2的标识 */
+    border-right: 3px solid #45b7d1; /* 添加蓝色右侧边框，作为玩家2的标识 */
     position: absolute; /* 使用绝对定位 */
     right: 10px; /* 距离右侧10px */
     top: 0; /* 距离顶部0px */
-    max-width: 150px; /* 设置最大宽度，避免信息面板过宽 */
+    max-width: 130px; /* 设置最大宽度，避免信息面板过宽 */
+}
+
+/* 丧尸数量样式 */
+/* 显示当前丧尸数量的样式 */
+.zombie-count {
+    padding: 4px 8px; /* 添加内边距，使内容更加美观 */
+    border-radius: 6px; /* 设置圆角边框 */
+    transition: all 0.3s ease; /* 添加过渡效果 */
+    background-color: rgba(76, 175, 80, 0.1); /* 设置绿色调的半透明背景 */
+    border: 1px solid rgba(76, 175, 80, 0.7); /* 添加半透明的绿色边框 */
+    min-width: 80px; /* 设置最小宽度，确保信息显示完整 */
+    font-size: 11px; /* 设置字体大小 */
+    position: absolute; /* 使用绝对定位 */
+    left: 50%; /* 距离左侧50% */
+    transform: translateX(-50%); /* 向左移动自身宽度的50%，实现居中 */
+    top: 0; /* 距离顶部0px */
+    max-width: 100px; /* 设置最大宽度，避免信息面板过宽 */
+}
+
+/* 丧尸数量标题样式 */
+/* 丧尸数量标题的样式 */
+.zombie-count h3 {
+    color: #4caf50; /* 设置绿色文本，与丧尸数量的主题色一致 */
+    margin-bottom: 4px; /* 设置底部边距 */
+    font-size: 14px; /* 设置字体大小 */
+    font-weight: 600; /* 设置字体粗细 */
+    text-align: center; /* 文本居中 */
+}
+
+/* 丧尸数量文本样式 */
+/* 丧尸数量数字的样式 */
+.zombie-count p {
+    margin: 3px 0; /* 设置上下边距 */
+    font-size: 12px; /* 设置字体大小 */
+    color: #ccc; /* 设置文本颜色为浅灰色，与深色背景形成对比 */
+    text-align: center; /* 文本居中 */
 }
 
 /* 玩家1标题样式 */
 /* 玩家1名称的样式 */
 .player1 h3 {
     color: #ff6b6b; /* 设置红色文本，与玩家1的主题色一致 */
-    margin-bottom: 8px; /* 设置底部边距 */
-    font-size: 18px; /* 设置字体大小 */
+    margin-bottom: 4px; /* 设置底部边距 */
+    font-size: 16px; /* 设置字体大小 */
     font-weight: 600; /* 设置字体粗细 */
 }
 
@@ -129,16 +165,16 @@ canvas:hover {
 /* 玩家2名称的样式 */
 .player2 h3 {
     color: #45b7d1; /* 设置蓝色文本，与玩家2的主题色一致 */
-    margin-bottom: 8px; /* 设置底部边距 */
-    font-size: 18px; /* 设置字体大小 */
+    margin-bottom: 4px; /* 设置底部边距 */
+    font-size: 16px; /* 设置字体大小 */
     font-weight: 600; /* 设置字体粗细 */
 }
 
 /* 玩家信息详细样式 */
 /* 玩家详细信息的样式，覆盖之前的通用样式 */
 .player1 p, .player2 p {
-    margin: 5px 0; /* 设置上下边距 */
-    font-size: 14px; /* 设置字体大小 */
+    margin: 3px 0; /* 设置上下边距 */
+    font-size: 12px; /* 设置字体大小 */
     color: #ccc; /* 设置文本颜色为浅灰色，与深色背景形成对比 */
 }
 
@@ -154,6 +190,7 @@ canvas:hover {
     border: 1px solid #555; /* 添加灰色边框 */
     flex-wrap: wrap; /* 允许子元素在空间不足时换行 */
     gap: 15px; /* 设置子元素之间的间距 */
+    width: 900px; /* 宽度与画布宽度保持一致 */
 }
 
 /* 控制说明子容器样式 */
@@ -257,7 +294,7 @@ canvas:hover {
 /* 游戏结束和开始界面样式 */
 /* 游戏结束和开始界面的通用样式 */
 .game-over, .start-screen {
-    position: absolute; /* 使用绝对定位 */
+    position: fixed; /* 使用固定定位，相对于视口 */
     top: 50%; /* 距离顶部50% */
     left: 50%; /* 距离左侧50% */
     transform: translate(-50%, -50%); /* 向左和向上移动自身宽度和高度的50%，实现居中效果 */
@@ -265,7 +302,7 @@ canvas:hover {
     padding: 50px; /* 添加内边距 */
     border-radius: 15px; /* 设置圆角边框 */
     text-align: center; /* 文本居中 */
-    z-index: 1000; /* 设置z-index，确保界面显示在最上方 */
+    z-index: 10000; /* 设置z-index为最高，确保界面显示在最上方 */
     border: 2px solid #555; /* 添加灰色边框 */
     box-shadow: 0 0 50px rgba(255, 107, 107, 0.3); /* 添加阴影效果 */
     backdrop-filter: blur(10px); /* 添加背景模糊效果 */
@@ -287,6 +324,31 @@ canvas:hover {
     font-size: 18px; /* 设置字体大小 */
     color: #ccc; /* 设置文本颜色为浅灰色 */
     line-height: 1.5; /* 设置行高，提高可读性 */
+}
+
+/* 游戏说明样式 */
+/* 游戏开始界面中的游戏说明样式 */
+.game-description {
+    background-color: rgba(40, 40, 40, 0.8); /* 设置半透明的深灰色背景 */
+    border: 1px solid rgba(85, 85, 85, 0.8); /* 添加半透明的灰色边框 */
+    border-radius: 8px; /* 设置圆角边框 */
+    padding: 20px; /* 添加内边距 */
+    margin: 20px 0; /* 添加上下边距 */
+    text-align: left; /* 文本左对齐 */
+}
+
+.game-description h3 {
+    color: #ff6b6b; /* 设置标题颜色为红色 */
+    font-size: 20px; /* 设置字体大小 */
+    margin-bottom: 10px; /* 设置底部边距 */
+    margin-top: 15px; /* 设置顶部边距 */
+}
+
+.game-description p {
+    margin-bottom: 8px; /* 设置底部边距 */
+    font-size: 14px; /* 设置字体大小 */
+    color: #ccc; /* 设置文本颜色为浅灰色 */
+    line-height: 1.4; /* 设置行高 */
 }
 
 /* 按钮样式 */

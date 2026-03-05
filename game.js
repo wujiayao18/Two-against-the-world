@@ -10,12 +10,14 @@ let keys = {}; // 键盘按键状态
 let mouse = { x: 0, y: 0 }; // 鼠标位置
 let lastZombieSpawn = 0; // 上次生成僵尸的时间戳
 let zombieSpawnInterval = 2000; // 僵尸生成间隔（毫秒）
-let maxZombies = 50; // 保持不动，最大僵尸数量限制，减少僵尸数量提高性能
+let maxZombies = 100; // 保持不动，最大僵尸数量限制，减少僵尸数量提高性能
 let frameCount = 0; // 帧计数器，用于优化绘制
 let audioContext = null; // 音频上下文，用于播放音效
 // 作弊功能变量
 let godMode = false; // 无敌模式
 let freezeZombies = false; // 怪物静止模式
+let infiniteAmmo = false; // 无限子弹模式
+let gameSpeed = 1.0; // 游戏速度，1.0为正常速度
 
 // 日志功能
 function addLog(message) {
@@ -62,6 +64,11 @@ class Player {
         this.reviveStartTime = 0; // 复活开始时间
         this.reviveDuration = 1000; // 复活持续时间（毫秒）
         
+        // 自动回血设置
+        this.healthRegenRate = 1; // 每秒恢复的生命值
+        this.lastHealthRegenTime = 0; // 上次回血时间
+        this.healthRegenInterval = 1000; // 回血间隔（毫秒）
+        
         // 武器系统
         this.weapons = {
             pistol: {
@@ -87,10 +94,10 @@ class Player {
             uzi: {
                 name: 'UZI冲锋枪',
                 damage: 15, // 伤害值
-                fireRate: 100, // 射击间隔（毫秒）
+                fireRate: 50, // 射击间隔（毫秒），加快射速
                 bulletSpeed: 7, // 子弹速度
-                magazineSize: 30, // 弹匣容量
-                currentAmmo: 30, // 当前弹药
+                magazineSize: 50, // 弹匣容量，增加子弹数量
+                currentAmmo: 50, // 当前弹药，增加子弹数量
                 reloadTime: 1200, // 换弹时间（毫秒）
                 knockback: 3 // 击退距离
             },
@@ -120,7 +127,7 @@ class Player {
         this.reloadStartTime = 0; // 换弹开始时间
         this.isAI = !isPlayer1; // 玩家2默认为AI
         this.aiLastDirectionChange = 0; // 上次方向改变时间
-        this.aiDirectionChangeInterval = 1000; // 方向改变间隔（毫秒）
+        this.aiDirectionChangeInterval = 500; // 方向改变间隔（毫秒），一秒最多转向2次
         this.aiLastShootTime = 0; // 上次射击时间
         this.aiShootInterval = 300; // 射击间隔（毫秒）
         
@@ -143,13 +150,21 @@ class Player {
         // 死亡玩家不能操作
         if (this.isDead) return;
         
+        // 自动回血逻辑
+        const now = Date.now();
+        if (now - this.lastHealthRegenTime >= this.healthRegenInterval / gameSpeed) {
+            if (this.health < 100) {
+                this.health = Math.min(100, this.health + this.healthRegenRate);
+                this.lastHealthRegenTime = now;
+            }
+        }
+        
         // 移动逻辑
         let moveX = 0;
         let moveY = 0;
         
         // AI行为逻辑
         if (this.isAI) {
-            const now = Date.now();
             
             // 优先复活死亡队友
             const deadTeammates = players.filter(teammate => teammate.isDead && teammate !== this);
@@ -210,7 +225,7 @@ class Player {
                     const distance = Math.sqrt(dx * dx + dy * dy);
                     
                     if (distance > 80) { // 保持80像素的距离
-                        const moveMagnitude = Math.min(this.speed, distance - 80);
+                        const moveMagnitude = Math.min(this.speed * gameSpeed, distance - 80);
                         let intendedX = (dx / distance) * moveMagnitude;
                         let intendedY = (dy / distance) * moveMagnitude;
                         
@@ -238,11 +253,11 @@ class Player {
                             // 尝试找到一个可行的方向
                             let foundPath = false;
                             for (const dir of directions) {
-                                const testX = this.x + dir.x * this.speed;
-                                const testY = this.y + dir.y * this.speed;
+                                const testX = this.x + dir.x * this.speed * gameSpeed;
+                                const testY = this.y + dir.y * this.speed * gameSpeed;
                                 if (!isPathBlocked(this.x, this.y, testX, testY)) {
-                                    moveX = dir.x * this.speed;
-                                    moveY = dir.y * this.speed;
+                                    moveX = dir.x * this.speed * gameSpeed;
+                                    moveY = dir.y * this.speed * gameSpeed;
                                     foundPath = true;
                                     break;
                                 }
@@ -258,6 +273,10 @@ class Player {
                             moveX = intendedX;
                             moveY = intendedY;
                         }
+                    } else {
+                        // 靠近队友时，保持静止，避免抖动
+                        moveX = 0;
+                        moveY = 0;
                     }
                 }
                 
@@ -292,15 +311,40 @@ class Player {
                         const dy = closestZombie.y - this.y;
                         const distance = Math.sqrt(dx * dx + dy * dy);
                         
+                        // 检查是否靠近队友
+                        let nearTeammate = false;
+                        const aliveTeammates = players.filter(teammate => !teammate.isDead && teammate !== this);
+                        if (aliveTeammates.length > 0) {
+                            for (const teammate of aliveTeammates) {
+                                const teammateDistance = Math.sqrt(
+                                    Math.pow(teammate.x - this.x, 2) + Math.pow(teammate.y - this.y, 2)
+                                );
+                                if (teammateDistance < 100) {
+                                    nearTeammate = true;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        // 根据距离调整转向频率
+                        let adjustedDirectionChangeInterval = this.aiDirectionChangeInterval;
+                        if (distance < 30) {
+                            // 距离小于30像素时，转向频率降低为原来的3倍
+                            adjustedDirectionChangeInterval = this.aiDirectionChangeInterval * 3;
+                        } else if (distance < 50) {
+                            // 距离小于50像素时，转向频率降低为原来的2倍
+                            adjustedDirectionChangeInterval = this.aiDirectionChangeInterval * 2;
+                        }
+                        
                         // 限制转向频率
-                        if (now - this.aiLastDirectionChange > this.aiDirectionChangeInterval) {
+                        if (now - this.aiLastDirectionChange > adjustedDirectionChangeInterval) {
                             // 更新方向
                             this.direction = { x: dx / distance, y: dy / distance };
                             this.aiLastDirectionChange = now;
                         }
                         
                         // 限制射击频率
-                        if (now - this.aiLastShootTime > this.aiShootInterval) {
+                        if (now - this.aiLastShootTime > this.aiShootInterval / gameSpeed) {
                             // 射击
                             this.shoot();
                             this.aiLastShootTime = now;
@@ -308,26 +352,42 @@ class Player {
                     }
                 }
                 
-                // 确保AI不会停止移动
+                // 确保AI不会停止移动，但靠近队友时除外
                 if (moveX === 0 && moveY === 0) {
-                    // 随机移动
-                    const angle = Math.random() * Math.PI * 2;
-                    moveX = Math.cos(angle) * this.speed;
-                    moveY = Math.sin(angle) * this.speed;
+                    // 检查是否靠近队友
+                    let nearTeammate = false;
+                    const aliveTeammates = players.filter(teammate => !teammate.isDead && teammate !== this);
+                    if (aliveTeammates.length > 0) {
+                        for (const teammate of aliveTeammates) {
+                            const teammateDistance = Math.sqrt(
+                                Math.pow(teammate.x - this.x, 2) + Math.pow(teammate.y - this.y, 2)
+                            );
+                            if (teammateDistance < 100) {
+                                nearTeammate = true;
+                                break;
+                            }
+                        }
+                    }
+                    // 只有在不靠近队友时才随机移动
+                    if (!nearTeammate) {
+                        const angle = Math.random() * Math.PI * 2;
+                        moveX = Math.cos(angle) * this.speed;
+                        moveY = Math.sin(angle) * this.speed;
+                    }
                 }
             }
         } else {
             // 玩家控制逻辑
             if (this.isPlayer1) {
-                if (keys['w']) moveY -= this.speed;
-                if (keys['s']) moveY += this.speed;
-                if (keys['a']) moveX -= this.speed;
-                if (keys['d']) moveX += this.speed;
+                if (keys['w']) moveY -= this.speed * gameSpeed;
+                if (keys['s']) moveY += this.speed * gameSpeed;
+                if (keys['a']) moveX -= this.speed * gameSpeed;
+                if (keys['d']) moveX += this.speed * gameSpeed;
             } else {
-                if (keys['ArrowUp']) moveY -= this.speed;
-                if (keys['ArrowDown']) moveY += this.speed;
-                if (keys['ArrowLeft']) moveX -= this.speed;
-                if (keys['ArrowRight']) moveX += this.speed;
+                if (keys['ArrowUp']) moveY -= this.speed * gameSpeed;
+                if (keys['ArrowDown']) moveY += this.speed * gameSpeed;
+                if (keys['ArrowLeft']) moveX -= this.speed * gameSpeed;
+                if (keys['ArrowRight']) moveX += this.speed * gameSpeed;
             }
         }
         
@@ -358,6 +418,61 @@ class Player {
             }
         }
         
+        // 检测与其他玩家的碰撞
+        if (canMoveX) {
+            for (const player of players) {
+                if (player !== this && !player.isDead) {
+                    if (collisionWithVolume(testRectX, player)) {
+                        canMoveX = false;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // 检测与僵尸的碰撞
+        if (canMoveX) {
+            for (const zombie of zombies) {
+                if (collisionWithVolume(testRectX, zombie)) {
+                    canMoveX = false;
+                    // 推开僵尸 - 限制推挤距离，但无法推开BOSS，AI玩家不会推开僵尸，并检查是否会被推入地形
+                    if (!zombie.isBoss && !this.isAI) {
+                        const pushDistance = Math.min(3, Math.abs(moveX) * 2);
+                        if (moveX > 0) {
+                            const newX = Math.min(canvas.width - zombie.width, zombie.x + pushDistance);
+                            // 检查新位置是否会与障碍物碰撞
+                            const testZombieX = { x: newX, y: zombie.y, width: zombie.width, height: zombie.height, collisionRadius: zombie.collisionRadius };
+                            let canPush = true;
+                            for (const obstacle of obstacles) {
+                                if (collisionWithVolume(testZombieX, obstacle)) {
+                                    canPush = false;
+                                    break;
+                                }
+                            }
+                            if (canPush) {
+                                zombie.x = newX;
+                            }
+                        } else if (moveX < 0) {
+                            const newX = Math.max(0, zombie.x - pushDistance);
+                            // 检查新位置是否会与障碍物碰撞
+                            const testZombieX = { x: newX, y: zombie.y, width: zombie.width, height: zombie.height, collisionRadius: zombie.collisionRadius };
+                            let canPush = true;
+                            for (const obstacle of obstacles) {
+                                if (collisionWithVolume(testZombieX, obstacle)) {
+                                    canPush = false;
+                                    break;
+                                }
+                            }
+                            if (canPush) {
+                                zombie.x = newX;
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        
         // 检测Y方向移动
         const testY = this.y + moveY;
         const testRectY = { x: this.x, y: testY, width: this.width, height: this.height, collisionRadius: this.collisionRadius };
@@ -368,23 +483,110 @@ class Player {
             }
         }
         
-        // 更新位置
-        if (canMoveX) {
-            this.x = Math.max(0, Math.min(canvas.width - this.width, testX));
-        }
+        // 检测与其他玩家的碰撞
         if (canMoveY) {
+            for (const player of players) {
+                if (player !== this && !player.isDead) {
+                    if (collisionWithVolume(testRectY, player)) {
+                        canMoveY = false;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // 检测与僵尸的碰撞
+        if (canMoveY) {
+            for (const zombie of zombies) {
+                if (collisionWithVolume(testRectY, zombie)) {
+                    canMoveY = false;
+                    // 推开僵尸 - 限制推挤距离，但无法推开BOSS，AI玩家不会推开僵尸，并检查是否会被推入地形
+                    if (!zombie.isBoss && !this.isAI) {
+                        const pushDistance = Math.min(3, Math.abs(moveY) * 2);
+                        if (moveY > 0) {
+                            const newY = Math.min(canvas.height - zombie.height, zombie.y + pushDistance);
+                            // 检查新位置是否会与障碍物碰撞
+                            const testZombieY = { x: zombie.x, y: newY, width: zombie.width, height: zombie.height, collisionRadius: zombie.collisionRadius };
+                            let canPush = true;
+                            for (const obstacle of obstacles) {
+                                if (collisionWithVolume(testZombieY, obstacle)) {
+                                    canPush = false;
+                                    break;
+                                }
+                            }
+                            if (canPush) {
+                                zombie.y = newY;
+                            }
+                        } else if (moveY < 0) {
+                            const newY = Math.max(0, zombie.y - pushDistance);
+                            // 检查新位置是否会与障碍物碰撞
+                            const testZombieY = { x: zombie.x, y: newY, width: zombie.width, height: zombie.height, collisionRadius: zombie.collisionRadius };
+                            let canPush = true;
+                            for (const obstacle of obstacles) {
+                                if (collisionWithVolume(testZombieY, obstacle)) {
+                                    canPush = false;
+                                    break;
+                                }
+                            }
+                            if (canPush) {
+                                zombie.y = newY;
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        
+        // 更新位置 - 使用滑动机制
+        if (canMoveX && canMoveY) {
+            // 两个方向都可以移动
+            if (canMoveX) {
+                this.x = Math.max(0, Math.min(canvas.width - this.width, testX));
+            }
+            if (canMoveY) {
+                this.y = Math.max(0, Math.min(canvas.height - this.height, testY));
+            }
+        } else if (canMoveX && !canMoveY) {
+            // 只有X方向可以移动
+            this.x = Math.max(0, Math.min(canvas.width - this.width, testX));
+        } else if (!canMoveX && canMoveY) {
+            // 只有Y方向可以移动
             this.y = Math.max(0, Math.min(canvas.height - this.height, testY));
         }
+        // 如果两个方向都不能移动，玩家保持原地
         
         // 更新方向
         if (moveX !== 0 || moveY !== 0) {
-            const magnitude = Math.sqrt(moveX * moveX + moveY * moveY);
-            this.direction = { x: moveX / magnitude, y: moveY / magnitude };
+            // AI玩家在靠近队友时不根据移动向量更新朝向
+            if (!this.isAI) {
+                const magnitude = Math.sqrt(moveX * moveX + moveY * moveY);
+                this.direction = { x: moveX / magnitude, y: moveY / magnitude };
+            } else {
+                // 检查是否靠近队友
+                let nearTeammate = false;
+                const aliveTeammates = players.filter(teammate => !teammate.isDead && teammate !== this);
+                if (aliveTeammates.length > 0) {
+                    for (const teammate of aliveTeammates) {
+                        const teammateDistance = Math.sqrt(
+                            Math.pow(teammate.x - this.x, 2) + Math.pow(teammate.y - this.y, 2)
+                        );
+                        if (teammateDistance < 100) {
+                            nearTeammate = true;
+                            break;
+                        }
+                    }
+                }
+                // 靠近队友时，不根据移动向量更新朝向，避免抖动
+                if (!nearTeammate) {
+                    const magnitude = Math.sqrt(moveX * moveX + moveY * moveY);
+                    this.direction = { x: moveX / magnitude, y: moveY / magnitude };
+                }
+            }
         }
         
         // 处理无敌时间
-        const now = Date.now();
-        if (this.isInvulnerable && now - this.lastHitTime > this.invulnerabilityDuration) {
+        if (this.isInvulnerable && now - this.lastHitTime > this.invulnerabilityDuration / gameSpeed) {
             this.isInvulnerable = false;
             this.isFlashing = false;
         }
@@ -400,7 +602,7 @@ class Player {
         // 处理换弹逻辑
         if (this.isReloading) {
             const weapon = this.weapons[this.currentWeapon];
-            if (now - this.reloadStartTime > weapon.reloadTime) {
+            if (now - this.reloadStartTime > weapon.reloadTime / gameSpeed) {
                 weapon.currentAmmo = weapon.magazineSize;
                 this.isReloading = false;
                 addLog(`玩家${this.isPlayer1 ? '1' : '2'}换弹完成 - ${weapon.name}`);
@@ -430,7 +632,7 @@ class Player {
             if (distance > 50) { // 超过50像素范围，中断复活
                 this.isReviving = false;
                 this.reviveTarget = null;
-            } else if (now - this.reviveStartTime > this.reviveDuration) {
+            } else if (now - this.reviveStartTime > this.reviveDuration / gameSpeed) {
                 // 复活成功
                 this.reviveTarget.health = 50;
                 this.reviveTarget.isDead = false;
@@ -552,10 +754,10 @@ class Player {
         const weapon = this.weapons[this.currentWeapon];
         
         // 检查是否可以射击
-        if (now - this.lastShot < weapon.fireRate || this.isDead || this.isReviving || this.isReloading) return;
+        if (now - this.lastShot < weapon.fireRate / gameSpeed || this.isDead || this.isReviving || this.isReloading) return;
         
-        // 检查弹药（如果不是无限子弹）
-        if (weapon.currentAmmo === 0) {
+        // 检查弹药（如果不是无限子弹且不在无限子弹模式下）
+        if (weapon.currentAmmo === 0 && !infiniteAmmo) {
             // 自动换弹
             this.reload();
             return;
@@ -563,8 +765,8 @@ class Player {
         
         this.lastShot = now;
         
-        // 消耗弹药（如果不是无限子弹）
-        if (weapon.currentAmmo > 0) {
+        // 消耗弹药（如果不是无限子弹且不在无限子弹模式下）
+        if (weapon.currentAmmo > 0 && !infiniteAmmo) {
             weapon.currentAmmo--;
         }
         
@@ -619,7 +821,7 @@ class Player {
         const weapon = this.weapons[this.currentWeapon];
         
         // 无限子弹不需要换弹
-        if (weapon.magazineSize === -1) return;
+        if (weapon.magazineSize === -1 || infiniteAmmo) return;
         
         // 已经在换弹中
         if (this.isReloading) return;
@@ -680,15 +882,23 @@ class Zombie {
             this.color = '#ff6b6b';
             this.speed = 0.08; // BOSS僵尸移动速度
             this.health = 400;
+            this.turnSpeed = 0.01; // BOSS僵尸转向速度
         } else {
-            this.width = 25;
-            this.height = 25;
+            this.width = 21;
+            this.height = 21;
             this.collisionRadius = 10; // 普通僵尸碰撞半径
             this.collisionType = 'zombie'; // 碰撞类型
             this.color = '#4caf50';
             this.speed = 0.2; // 普通僵尸移动速度
             this.health = 50;
+            this.turnSpeed = 0.015; // 普通僵尸转向速度
         }
+        
+        // 朝向属性
+        this.direction = { x: 0, y: -1 }; // 默认向上
+        this.facingAngle = Math.atan2(this.direction.y, this.direction.x); // 当前朝向角度
+        this.targetAngle = this.facingAngle; // 目标朝向角度
+        this.turnDirection = 1; // 转向方向：1为顺时针，-1为逆时针
     }
 
     update() {
@@ -738,9 +948,39 @@ class Zombie {
         const dy = closestPlayer.y - this.y;
         const magnitude = Math.sqrt(dx * dx + dy * dy);
         
+        // 计算目标朝向角度
+        this.targetAngle = Math.atan2(dy, dx);
+        
+        // 平滑转向
+        let angleDiff = this.targetAngle - this.facingAngle;
+        
+        // 规范化角度差到[-π, π]范围内
+        while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+        while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+        
+        // 确定转向方向
+        if (angleDiff > 0) {
+            this.turnDirection = 1; // 顺时针
+        } else {
+            this.turnDirection = -1; // 逆时针
+        }
+        
+        // 平滑转向
+        if (Math.abs(angleDiff) > this.turnSpeed) {
+            this.facingAngle += this.turnDirection * this.turnSpeed;
+        } else {
+            this.facingAngle = this.targetAngle;
+        }
+        
+        // 更新朝向向量
+        this.direction = {
+            x: Math.cos(this.facingAngle),
+            y: Math.sin(this.facingAngle)
+        };
+        
         // 计算移动向量
-        const moveX = (dx / magnitude) * this.speed;
-        const moveY = (dy / magnitude) * this.speed;
+        const moveX = (dx / magnitude) * this.speed * gameSpeed;
+        const moveY = (dy / magnitude) * this.speed * gameSpeed;
         
         // 检测与障碍物的碰撞
         let canMoveX = true;
@@ -756,6 +996,88 @@ class Zombie {
             }
         }
         
+        // 检测与玩家的碰撞
+        if (canMoveX) {
+            for (const player of players) {
+                if (!player.isDead && collisionWithVolume(testRectX, player)) {
+                    canMoveX = false;
+                    // 推开玩家 - 限制推挤距离，并检查是否会被推入地形
+                    const pushDistance = Math.min(2, Math.abs(moveX) * 1.5);
+                    if (moveX > 0) {
+                        const newX = Math.min(canvas.width - player.width, player.x + pushDistance);
+                        // 检查新位置是否会与障碍物碰撞
+                        const testPlayerX = { x: newX, y: player.y, width: player.width, height: player.height, collisionRadius: player.collisionRadius };
+                        let canPush = true;
+                        for (const obstacle of obstacles) {
+                            if (collisionWithVolume(testPlayerX, obstacle)) {
+                                canPush = false;
+                                break;
+                            }
+                        }
+                        if (canPush) {
+                            player.x = newX;
+                        }
+                    } else if (moveX < 0) {
+                        const newX = Math.max(0, player.x - pushDistance);
+                        // 检查新位置是否会与障碍物碰撞
+                        const testPlayerX = { x: newX, y: player.y, width: player.width, height: player.height, collisionRadius: player.collisionRadius };
+                        let canPush = true;
+                        for (const obstacle of obstacles) {
+                            if (collisionWithVolume(testPlayerX, obstacle)) {
+                                canPush = false;
+                                break;
+                            }
+                        }
+                        if (canPush) {
+                            player.x = newX;
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        
+        // 检测与其他僵尸的碰撞
+        if (canMoveX) {
+            for (const zombie of zombies) {
+                if (zombie !== this && collisionWithVolume(testRectX, zombie)) {
+                    canMoveX = false;
+                    // 推开其他僵尸 - 限制推挤距离，并检查是否会被推入地形
+                    const pushDistance = Math.min(1, Math.abs(moveX));
+                    if (moveX > 0) {
+                        const newX = Math.min(canvas.width - zombie.width, zombie.x + pushDistance);
+                        // 检查新位置是否会与障碍物碰撞
+                        const testZombieX = { x: newX, y: zombie.y, width: zombie.width, height: zombie.height, collisionRadius: zombie.collisionRadius };
+                        let canPush = true;
+                        for (const obstacle of obstacles) {
+                            if (collisionWithVolume(testZombieX, obstacle)) {
+                                canPush = false;
+                                break;
+                            }
+                        }
+                        if (canPush) {
+                            zombie.x = newX;
+                        }
+                    } else if (moveX < 0) {
+                        const newX = Math.max(0, zombie.x - pushDistance);
+                        // 检查新位置是否会与障碍物碰撞
+                        const testZombieX = { x: newX, y: zombie.y, width: zombie.width, height: zombie.height, collisionRadius: zombie.collisionRadius };
+                        let canPush = true;
+                        for (const obstacle of obstacles) {
+                            if (collisionWithVolume(testZombieX, obstacle)) {
+                                canPush = false;
+                                break;
+                            }
+                        }
+                        if (canPush) {
+                            zombie.x = newX;
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        
         // 检测Y方向移动
         const testY = this.y + moveY;
         const testRectY = { x: this.x, y: testY, width: this.width, height: this.height, collisionRadius: this.collisionRadius };
@@ -766,44 +1088,169 @@ class Zombie {
             }
         }
         
-        // 更新位置
-        if (canMoveX) {
-            this.x = testX;
-        }
+        // 检测与玩家的碰撞
         if (canMoveY) {
+            for (const player of players) {
+                if (!player.isDead && collisionWithVolume(testRectY, player)) {
+                    canMoveY = false;
+                    // 推开玩家 - 限制推挤距离，并检查是否会被推入地形
+                    const pushDistance = Math.min(2, Math.abs(moveY) * 1.5);
+                    if (moveY > 0) {
+                        const newY = Math.min(canvas.height - player.height, player.y + pushDistance);
+                        // 检查新位置是否会与障碍物碰撞
+                        const testPlayerY = { x: player.x, y: newY, width: player.width, height: player.height, collisionRadius: player.collisionRadius };
+                        let canPush = true;
+                        for (const obstacle of obstacles) {
+                            if (collisionWithVolume(testPlayerY, obstacle)) {
+                                canPush = false;
+                                break;
+                            }
+                        }
+                        if (canPush) {
+                            player.y = newY;
+                        }
+                    } else if (moveY < 0) {
+                        const newY = Math.max(0, player.y - pushDistance);
+                        // 检查新位置是否会与障碍物碰撞
+                        const testPlayerY = { x: player.x, y: newY, width: player.width, height: player.height, collisionRadius: player.collisionRadius };
+                        let canPush = true;
+                        for (const obstacle of obstacles) {
+                            if (collisionWithVolume(testPlayerY, obstacle)) {
+                                canPush = false;
+                                break;
+                            }
+                        }
+                        if (canPush) {
+                            player.y = newY;
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        
+        // 检测与其他僵尸的碰撞
+        if (canMoveY) {
+            for (const zombie of zombies) {
+                if (zombie !== this && collisionWithVolume(testRectY, zombie)) {
+                    canMoveY = false;
+                    // 推开其他僵尸 - 限制推挤距离，并检查是否会被推入地形
+                    const pushDistance = Math.min(1, Math.abs(moveY));
+                    if (moveY > 0) {
+                        const newY = Math.min(canvas.height - zombie.height, zombie.y + pushDistance);
+                        // 检查新位置是否会与障碍物碰撞
+                        const testZombieY = { x: zombie.x, y: newY, width: zombie.width, height: zombie.height, collisionRadius: zombie.collisionRadius };
+                        let canPush = true;
+                        for (const obstacle of obstacles) {
+                            if (collisionWithVolume(testZombieY, obstacle)) {
+                                canPush = false;
+                                break;
+                            }
+                        }
+                        if (canPush) {
+                            zombie.y = newY;
+                        }
+                    } else if (moveY < 0) {
+                        const newY = Math.max(0, zombie.y - pushDistance);
+                        // 检查新位置是否会与障碍物碰撞
+                        const testZombieY = { x: zombie.x, y: newY, width: zombie.width, height: zombie.height, collisionRadius: zombie.collisionRadius };
+                        let canPush = true;
+                        for (const obstacle of obstacles) {
+                            if (collisionWithVolume(testZombieY, obstacle)) {
+                                canPush = false;
+                                break;
+                            }
+                        }
+                        if (canPush) {
+                            zombie.y = newY;
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        
+        // 更新位置 - 使用滑动机制
+        if (canMoveX && canMoveY) {
+            // 两个方向都可以移动
+            this.x = testX;
+            this.y = testY;
+        } else if (canMoveX && !canMoveY) {
+            // 只有X方向可以移动
+            this.x = testX;
+        } else if (!canMoveX && canMoveY) {
+            // 只有Y方向可以移动
             this.y = testY;
         }
+        // 如果两个方向都不能移动，僵尸保持原地
     }
 
     draw() {
+        ctx.save();
+        
+        // 将坐标系原点移动到僵尸中心
+        const centerX = this.x + this.width / 2;
+        const centerY = this.y + this.height / 2;
+        ctx.translate(centerX, centerY);
+        
+        // 旋转整个僵尸（额外旋转90度）
+        ctx.rotate(this.facingAngle + Math.PI / 2);
+        
         // 绘制僵尸身体
         ctx.fillStyle = this.color;
-        ctx.fillRect(this.x, this.y, this.width, this.height);
+        ctx.fillRect(-this.width / 2, -this.height / 2, this.width, this.height);
         
-        // 绘制僵尸头部
+        // 绘制僵尸头部 - 椭圆形，窄边对着前方（Y轴负方向）
         ctx.fillStyle = '#333';
         ctx.beginPath();
-        ctx.arc(this.x + this.width / 2, this.y + this.height / 3, this.width / 4, 0, Math.PI * 2);
+        ctx.ellipse(0, -this.height / 2 - this.width / 8, this.width / 8, this.width / 4, 0, 0, Math.PI * 2);
         ctx.fill();
         
-        // 绘制僵尸眼睛
+        // 绘制僵尸眼睛 - 在头部前方，左右排列
         ctx.fillStyle = '#ff0000';
+        const eyeOffset = this.width / 8;
+        const eyeX = 0;
+        const eyeY = -this.height / 2 - this.width / 8;
+        const eyeRadius = this.width / 8;
+        
         ctx.beginPath();
-        ctx.arc(this.x + this.width / 3, this.y + this.height / 3, this.width / 8, 0, Math.PI * 2);
-        ctx.arc(this.x + 2 * this.width / 3, this.y + this.height / 3, this.width / 8, 0, Math.PI * 2);
+        ctx.arc(eyeX - eyeOffset, eyeY, eyeRadius, 0, Math.PI * 2);
+        ctx.arc(eyeX + eyeOffset, eyeY, eyeRadius, 0, Math.PI * 2);
         ctx.fill();
         
-        // 绘制僵尸手臂
+        // 绘制僵尸手臂 - 向前伸出
         ctx.fillStyle = this.color;
-        ctx.fillRect(this.x - 10, this.y + this.height / 2, 10, 20);
-        ctx.fillRect(this.x + this.width, this.y + this.height / 2, 10, 20);
+        const armLength = 25;
+        const armWidth = 10;
+        const armXOffset = this.width / 1.25;
+        const armYOffset = -this.height / 2 + 10;
         
-        // 绘制生命值条
+        // 左手臂 - 从身体左侧向前伸出
+        ctx.beginPath();
+        ctx.moveTo(-armXOffset, armYOffset);
+        ctx.lineTo(-armXOffset, armYOffset - armLength);
+        ctx.lineTo(-armXOffset + armWidth, armYOffset - armLength);
+        ctx.lineTo(-armXOffset + armWidth, armYOffset);
+        ctx.closePath();
+        ctx.fill();
+        
+        // 右手臂 - 从身体右侧向前伸出
+        ctx.beginPath();
+        ctx.moveTo(armXOffset - armWidth, armYOffset);
+        ctx.lineTo(armXOffset - armWidth, armYOffset - armLength);
+        ctx.lineTo(armXOffset, armYOffset - armLength);
+        ctx.lineTo(armXOffset, armYOffset);
+        ctx.closePath();
+        ctx.fill();
+        
+        ctx.restore();
+        
+        // 绘制生命值条（不旋转）
         ctx.fillStyle = '#ff6b6b';
         const maxHealth = this.isBoss ? 400 : 50;
         ctx.fillRect(this.x, this.y - 10, this.width * (this.health / maxHealth), 5);
         
-        // 绘制BOSS标识
+        // 绘制BOSS标识（不旋转）
         if (this.isBoss) {
             ctx.fillStyle = '#ffff00';
             ctx.font = '12px Arial';
@@ -891,6 +1338,21 @@ window.addEventListener('keydown', (e) => {
             });
             addLog(players[0].autoShoot ? '启用自动射击' : '禁用自动射击');
         }
+        // 数字键5：无限子弹
+        else if (e.key === '5') {
+            infiniteAmmo = !infiniteAmmo;
+            addLog(infiniteAmmo ? '启用无限子弹模式' : '禁用无限子弹模式');
+        }
+        // 加号键：加速游戏
+        else if (e.key === '+' || e.key === '=') {
+            gameSpeed = Math.min(5.0, gameSpeed + 1);
+            addLog(`游戏速度: ${gameSpeed.toFixed(0)}x`);
+        }
+        // 减号键：减速游戏
+        else if (e.key === '-' || e.key === '_') {
+            gameSpeed = Math.max(1.0, gameSpeed - 1);
+            addLog(`游戏速度: ${gameSpeed.toFixed(0)}x`);
+        }
     }
     
 
@@ -940,7 +1402,7 @@ function gameLoop() {
     
     // 生成僵尸
     const now = Date.now();
-    if (now - lastZombieSpawn > zombieSpawnInterval && zombies.length < maxZombies) {
+    if (now - lastZombieSpawn > zombieSpawnInterval / gameSpeed && zombies.length < maxZombies) {
         // 10%概率生成BOSS
         const isBoss = Math.random() < 0.1;
         zombies.push(new Zombie(isBoss));
@@ -965,20 +1427,44 @@ function gameLoop() {
         players.forEach(player => {
             if (player.health > 0 && !player.isDead && collisionWithVolume(zombie, player)) {
                 if (!godMode && !player.isInvulnerable) {
-                    const damage = 5;
-                    player.health = Math.max(0, player.health - damage);
-                    // 显示伤害飘字
-                    createDamageText(player.x + player.width / 2, player.y, damage);
-                    // 设置无敌时间
-                    player.isInvulnerable = true;
-                    player.isFlashing = true;
-                    player.lastHitTime = Date.now();
-                    player.lastFlashTime = Date.now();
-                    // 非无敌模式下执行僵尸击退（除非静止模式）
-                    if (!freezeZombies) {
-                        // 僵尸被击退
-                        zombie.x -= (zombie.x - player.x) / 10;
-                        zombie.y -= (zombie.y - player.y) / 10;
+                    // 检查僵尸是否正面对着玩家
+                    const zombieToPlayer = {
+                        x: player.x + player.width / 2 - (zombie.x + zombie.width / 2),
+                        y: player.y + player.height / 2 - (zombie.y + zombie.height / 2)
+                    };
+                    
+                    // 计算距离
+                    const distance = Math.sqrt(
+                        zombieToPlayer.x * zombieToPlayer.x + zombieToPlayer.y * zombieToPlayer.y
+                    );
+                    
+                    // 归一化向量
+                    const normalizedZombieToPlayer = {
+                        x: zombieToPlayer.x / distance,
+                        y: zombieToPlayer.y / distance
+                    };
+                    
+                    // 计算点积
+                    const dotProduct = zombie.direction.x * normalizedZombieToPlayer.x + 
+                                     zombie.direction.y * normalizedZombieToPlayer.y;
+                    
+                    // 只有当僵尸正面对着玩家时才造成伤害（点积大于0.7，约45度角内）
+                    if (dotProduct > 0.7) {
+                        const damage = 5;
+                        player.health = Math.max(0, player.health - damage);
+                        // 显示伤害飘字
+                        createDamageText(player.x + player.width / 2, player.y, damage);
+                        // 设置无敌时间
+                        player.isInvulnerable = true;
+                        player.isFlashing = true;
+                        player.lastHitTime = Date.now();
+                        player.lastFlashTime = Date.now();
+                        // 非无敌模式下执行僵尸击退（除非静止模式）
+                        if (!freezeZombies) {
+                            // 僵尸被击退
+                            zombie.x -= (zombie.x - player.x) / 10;
+                            zombie.y -= (zombie.y - player.y) / 10;
+                        }
                     }
                 }
             }
@@ -988,8 +1474,8 @@ function gameLoop() {
     // 更新和绘制子弹
     for (let i = bullets.length - 1; i >= 0; i--) {
         const bullet = bullets[i];
-        bullet.x += bullet.direction.x * bullet.speed;
-        bullet.y += bullet.direction.y * bullet.speed;
+        bullet.x += bullet.direction.x * bullet.speed * gameSpeed;
+        bullet.y += bullet.direction.y * bullet.speed * gameSpeed;
         
         ctx.fillStyle = bullet.player.color;
         ctx.fillRect(bullet.x, bullet.y, bullet.width, bullet.height);
@@ -1083,6 +1569,7 @@ function gameLoop() {
         document.getElementById('player1Score').textContent = players[0].score;
         document.getElementById('player2Health').textContent = godMode ? 100 : Math.max(0, players[1].health);
         document.getElementById('player2Score').textContent = players[1].score;
+        document.getElementById('zombieCount').textContent = zombies.length;
     }
     
     // 检查玩家死亡
@@ -1129,13 +1616,19 @@ function collisionWithVolume(obj1, obj2) {
 
 // 开始游戏
 function startGame() {
-    document.getElementById('startScreen').style.display = 'none';
-    document.getElementById('gameOver').style.display = 'none';
-    gameRunning = true;
-    zombieSpawnInterval = 2000;
-    init();
-    gameLoop();
-    addLog('游戏开始');
+    console.log('startGame called');
+    try {
+        document.getElementById('startScreen').style.display = 'none';
+        document.getElementById('gameOver').style.display = 'none';
+        gameRunning = true;
+        zombieSpawnInterval = 2000;
+        init();
+        gameLoop();
+        addLog('游戏开始');
+        console.log('Game started successfully');
+    } catch (e) {
+        console.error('Error starting game:', e);
+    }
 }
 
 // 重新开始游戏
@@ -1195,10 +1688,10 @@ function createDamageText(x, y, damage, color = '#ff0000', size = 16) {
 
 // 墙体配置参数
 const WALL_CONFIG = {
-    obstacleCount: 15, // 障碍物总数量
+    obstacleCount: 60, // 障碍物总数量
     unitSize: 30, // 最小地形单元大小
-    stoneWallProbability: 0.7, // 石墙生成概率（70%）
-    woodWallProbability: 0.3, // 木墙生成概率（30%）
+    stoneWallProbability: 0.6, // 石墙生成概率（60%）
+    woodWallProbability: 0.4, // 木墙生成概率（40%）
     stoneWallColor: '#666666', // 石墙颜色（灰色）
     woodWallColor: '#8b4513', // 木墙颜色（棕色）
     woodWallHealth: 100, // 木墙初始生命值
@@ -1206,7 +1699,7 @@ const WALL_CONFIG = {
     minUnits: 1, // 最小单元数
     maxUnits: 3, // 最大单元数
     safeDistance: 100, // 玩家初始位置的安全距离
-    isolationProbability: 0.01, // 孤立墙体的概率（1%）
+    isolationProbability: 0, // 孤立墙体的概率（0%，完全杜绝）
     maxConnections: 2 // 最大连接面数
 };
 
@@ -1317,7 +1810,7 @@ function generateObstacles() {
             // 检查是否在安全区域外且未被占用
             if (!grid[startY][startX]) {
                 // 检查周围是否有相邻的墙体
-                const neighbors = getNeighbors(grid, startX, startY);
+                const neighbors = getNeighbors(grid, startX, startY, obstacles);
                 const neighborCount = neighbors.filter(n => n.hasWall).length;
                 
                 // 检查是否是同一列或同一行的两面拼接
@@ -1335,30 +1828,26 @@ function generateObstacles() {
                 
                 // 增加两面拼接的概率，降低多面拼接的概率
                 if (neighborCount === 0) {
-                    // 孤立墙体概率较低
-                    if (Math.random() > WALL_CONFIG.isolationProbability) {
-                        continue;
-                    }
+                    // 孤立墙体，完全拒绝
+                    continue;
                 } else if (neighborCount === 1) {
-                    // 单面拼接，概率适中
-                    if (Math.random() > 0.3) { // 70%概率接受
-                        continue;
-                    }
+                    // 单面拼接，接受
                 } else if (neighborCount === 2) {
                     if (sameRowOrColumn) {
-                        // 同一列或同一行的两面拼接，概率非常高
-                        // 几乎总是接受
-                        if (Math.random() > 0.05) { // 95%概率接受
-                            continue;
-                        }
+                        // 同一列或同一行的两面拼接，接受
                     } else {
-                        // 其他两面拼接，概率适中
-                        if (Math.random() > 0.2) { // 80%概率接受
+                        // 其他两面拼接（对角线），98%概率拒绝，进一步降低对角线拼接的概率
+                        if (Math.random() < 0.98) {
                             continue;
                         }
                     }
-                } else if (neighborCount >= 3) {
-                    // 三面或四面拼接，完全拒绝
+                } else if (neighborCount === 3) {
+                    // 三面拼接，80%概率拒绝，降低3面拼接的概率
+                    if (Math.random() < 0.8) {
+                        continue;
+                    }
+                } else if (neighborCount >= 4) {
+                    // 四面或更多拼接，完全拒绝
                     continue;
                 }
                 
@@ -1386,6 +1875,10 @@ function generateObstacles() {
         
         // 检查区域是否已被占用，并且确保不会形成3面或4面拼接
         let canPlace = true;
+        let hasNeighbor = false; // 检查是否有邻居
+        let neighborCountTotal = 0; // 记录总邻居数量
+        let stoneNeighborCount = 0; // 记录石墙邻居数量
+        let woodNeighborCount = 0; // 记录木墙邻居数量
         for (let y = startY; y < startY + unitsY; y++) {
             for (let x = startX; x < startX + unitsX; x++) {
                 if (grid[y][x]) {
@@ -1393,15 +1886,45 @@ function generateObstacles() {
                     break;
                 }
                 
-                // 检查该位置的邻居数量，确保不会形成3面或4面拼接
-                const neighbors = getNeighbors(grid, x, y);
+                // 检查该位置的邻居数量，确保不会形成4面或更多拼接
+                const neighbors = getNeighbors(grid, x, y, obstacles);
                 const neighborCount = neighbors.filter(n => n.hasWall).length;
-                if (neighborCount >= 3) {
+                neighborCountTotal += neighborCount;
+                if (neighborCount >= 4) {
                     canPlace = false;
                     break;
                 }
+                
+                // 检查是否有邻居
+                if (neighborCount > 0) {
+                    hasNeighbor = true;
+                }
+                
+                // 统计石墙和木墙邻居数量
+                for (const neighbor of neighbors) {
+                    if (neighbor.hasWall && neighbor.obstacleType === 'stone') {
+                        stoneNeighborCount++;
+                    } else if (neighbor.hasWall && neighbor.obstacleType === 'wood') {
+                        woodNeighborCount++;
+                    }
+                }
             }
             if (!canPlace) break;
+        }
+        
+        // 如果不是第一个墙体且没有邻居，拒绝放置（杜绝孤立墙体）
+        if (placedObstacles > 0 && !hasNeighbor) {
+            canPlace = false;
+        }
+        
+        // 对于2x2墙体，要求至少有2个邻居，降低孤立2x2地形的概率
+        if (placedObstacles > 0 && unitsX === 2 && unitsY === 2 && neighborCountTotal < 2) {
+            canPlace = false;
+        }
+        
+        // 检查是否会形成封闭区域
+        if (canPlace && willCreateEnclosedArea(grid, startX, startY, unitsX, unitsY)) {
+            canPlace = false;
         }
         
         if (canPlace) {
@@ -1412,27 +1935,43 @@ function generateObstacles() {
                 }
             }
             
-            // 计算实际坐标
-            const x = startX * WALL_CONFIG.unitSize;
-            const y = startY * WALL_CONFIG.unitSize;
-            const width = unitsX * WALL_CONFIG.unitSize;
-            const height = unitsY * WALL_CONFIG.unitSize;
+            // 根据邻居类型优先选择墙体类型
+            let isStoneWall;
+            if (placedObstacles > 0 && (stoneNeighborCount > 0 || woodNeighborCount > 0)) {
+                // 优先选择与邻居相同类型的墙体
+                if (stoneNeighborCount >= woodNeighborCount) {
+                    isStoneWall = true;
+                } else {
+                    isStoneWall = false;
+                }
+            } else {
+                // 没有邻居或邻居数量相等，按概率生成
+                isStoneWall = Math.random() < WALL_CONFIG.stoneWallProbability;
+            }
             
-            // 根据概率生成石墙或木墙
-            const isStoneWall = Math.random() < WALL_CONFIG.stoneWallProbability;
-            const obstacle = {
-                x: x,
-                y: y,
-                width: width,
-                height: height,
-                collisionRadius: Math.min(width, height) / 2, // 碰撞半径
-                collisionType: 'obstacle', // 碰撞类型
-                color: isStoneWall ? WALL_CONFIG.stoneWallColor : WALL_CONFIG.woodWallColor,
-                type: isStoneWall ? 'stone' : 'wood', // 类型：stone（石墙）或 wood（木墙）
-                health: isStoneWall ? WALL_CONFIG.stoneWallHealth : WALL_CONFIG.woodWallHealth, // 生命值，-1表示不可破坏
-                damagePattern: isStoneWall ? null : generateDamagePattern(width, height) // 为木墙生成静态的损伤模式
-            };
-            obstacles.push(obstacle);
+            // 将2x2墙体拆分成4个独立的1x1墙体
+            for (let y = startY; y < startY + unitsY; y++) {
+                for (let x = startX; x < startX + unitsX; x++) {
+                    const obstacleX = x * WALL_CONFIG.unitSize;
+                    const obstacleY = y * WALL_CONFIG.unitSize;
+                    const width = WALL_CONFIG.unitSize;
+                    const height = WALL_CONFIG.unitSize;
+                    
+                    const obstacle = {
+                        x: obstacleX,
+                        y: obstacleY,
+                        width: width,
+                        height: height,
+                        collisionRadius: Math.min(width, height) / 2, // 碰撞半径
+                        collisionType: 'obstacle', // 碰撞类型
+                        color: isStoneWall ? WALL_CONFIG.stoneWallColor : WALL_CONFIG.woodWallColor,
+                        type: isStoneWall ? 'stone' : 'wood', // 类型：stone（石墙）或 wood（木墙）
+                        health: isStoneWall ? WALL_CONFIG.stoneWallHealth : WALL_CONFIG.woodWallHealth, // 生命值，-1表示不可破坏
+                        damagePattern: isStoneWall ? null : generateDamagePattern(width, height) // 为木墙生成静态的损伤模式
+                    };
+                    obstacles.push(obstacle);
+                }
+            }
             
             placedObstacles++;
         }
@@ -1440,30 +1979,109 @@ function generateObstacles() {
 }
 
 // 获取指定位置的邻居
-function getNeighbors(grid, x, y) {
+function getNeighbors(grid, x, y, obstacles = []) {
     const neighbors = [];
     const directions = [
         [-1, 0], // 上
         [1, 0],  // 下
         [0, -1], // 左
-        [0, 1]   // 右
+        [0, 1],  // 右
+        [-1, -1], // 左上
+        [-1, 1],  // 右上
+        [1, -1],  // 左下
+        [1, 1]    // 右下
     ];
     
     for (const [dx, dy] of directions) {
         const nx = x + dx;
         const ny = y + dy;
         if (nx >= 0 && nx < grid[0].length && ny >= 0 && ny < grid.length) {
+            // 查找该位置的障碍物类型
+            let obstacleType = null;
+            const obstacleX = nx * WALL_CONFIG.unitSize;
+            const obstacleY = ny * WALL_CONFIG.unitSize;
+            for (const obstacle of obstacles) {
+                if (obstacle.x === obstacleX && obstacle.y === obstacleY) {
+                    obstacleType = obstacle.type;
+                    break;
+                }
+            }
+            
             neighbors.push({
                 hasWall: grid[ny][nx],
                 dx: dx,
-                dy: dy
+                dy: dy,
+                obstacleType: obstacleType
             });
         } else {
-            neighbors.push({ hasWall: false, dx: dx, dy: dy });
+            neighbors.push({ hasWall: false, dx: dx, dy: dy, obstacleType: null });
         }
     }
     
     return neighbors;
+}
+
+// 检查是否会形成封闭区域
+function willCreateEnclosedArea(grid, startX, startY, unitsX, unitsY) {
+    // 创建临时网格
+    const tempGrid = grid.map(row => [...row]);
+    
+    // 标记要放置墙体的位置
+    for (let y = startY; y < startY + unitsY; y++) {
+        for (let x = startX; x < startX + unitsX; x++) {
+            tempGrid[y][x] = true;
+        }
+    }
+    
+    // 找到第一个空单元格
+    let firstEmpty = null;
+    for (let y = 0; y < tempGrid.length; y++) {
+        for (let x = 0; x < tempGrid[0].length; x++) {
+            if (!tempGrid[y][x]) {
+                firstEmpty = { x, y };
+                break;
+            }
+        }
+        if (firstEmpty) break;
+    }
+    
+    // 如果没有空单元格，返回false
+    if (!firstEmpty) return false;
+    
+    // 使用洪水填充算法计算连通的空单元格数量
+    const visited = new Set();
+    const queue = [firstEmpty];
+    visited.add(`${firstEmpty.x},${firstEmpty.y}`);
+    
+    while (queue.length > 0) {
+        const current = queue.shift();
+        const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+        
+        for (const [dx, dy] of directions) {
+            const nx = current.x + dx;
+            const ny = current.y + dy;
+            
+            if (nx >= 0 && nx < tempGrid[0].length && ny >= 0 && ny < tempGrid.length) {
+                if (!tempGrid[ny][nx] && !visited.has(`${nx},${ny}`)) {
+                    visited.add(`${nx},${ny}`);
+                    queue.push({ x: nx, y: ny });
+                }
+            }
+        }
+    }
+    
+    // 计算总空单元格数量
+    let totalEmpty = 0;
+    for (let y = 0; y < tempGrid.length; y++) {
+        for (let x = 0; x < tempGrid[0].length; x++) {
+            if (!tempGrid[y][x]) {
+                totalEmpty++;
+            }
+        }
+    }
+    
+    // 如果连通的空单元格数量小于总空单元格数量，说明形成了封闭区域
+    return visited.size < totalEmpty;
 }
 
 // 为木墙生成静态的损伤模式
@@ -1507,7 +2125,7 @@ function drawObstacles() {
             ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
             
             // 根据损伤程度显示静态的破碎效果
-            if (healthPercentage < 0.8) {
+            if (healthPercentage < 0.8 && obstacle.damagePattern && obstacle.damagePattern.cracks) {
                 // 轻微损伤：显示一些裂缝
                 ctx.strokeStyle = '#553311';
                 ctx.lineWidth = 1;
@@ -1529,7 +2147,7 @@ function drawObstacles() {
                 }
             }
             
-            if (healthPercentage < 0.5) {
+            if (healthPercentage < 0.5 && obstacle.damagePattern && obstacle.damagePattern.cracks) {
                 // 严重损伤：显示更多裂缝
                 ctx.strokeStyle = '#332211';
                 ctx.lineWidth = 2;
@@ -1549,7 +2167,7 @@ function drawObstacles() {
                 }
             }
             
-            if (healthPercentage < 0.2) {
+            if (healthPercentage < 0.2 && obstacle.damagePattern && obstacle.damagePattern.cracks) {
                 // 即将破坏：显示大部分破碎
                 ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
                 ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
@@ -1585,6 +2203,3 @@ function collision(rect1, rect2) {
            rect1.y < rect2.y + rect2.height &&
            rect1.y + rect1.height > rect2.y;
 }
-
-// 初始化
-window.onload = init;
