@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>双人打僵尸</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="game-container">
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+        <div class="game-info">
+            <div class="player1">
+                <h3>玩家1</h3>
+                <p>生命值: <span id="player1Health">100</span></p>
+                <p>分数: <span id="player1Score">0</span></p>
+            </div>
+            <div class="player2">
+                <h3>玩家2</h3>
+                <p>生命值: <span id="player2Health">100</span></p>
+                <p>分数: <span id="player2Score">0</span></p>
+            </div>
+        </div>
+        <div class="controls">
+            <div class="player1-controls">
+                <h4>玩家1控制</h4>
+                <p>WASD移动，空格键射击</p>
+            </div>
+            <div class="player2-controls">
+                <h4>玩家2控制</h4>
+                <p>方向键移动，回车键射击</p>
+            </div>
+            <div class="cheats">
+                <h4>作弊码</h4>
+                <p>1: 无敌 | 2: 怪物静止 | 3: 清屏</p>
+            </div>
+        </div>
+        <div id="gameOver" class="game-over">
+            <h2>游戏结束</h2>
+            <p id="winner"></p>
+            <button onclick="restartGame()">重新开始</button>
+        </div>
+        <div id="startScreen" class="start-screen">
+            <h2>双人打僵尸</h2>
+            <p>消灭所有僵尸，生存下来！</p>
+            <button onclick="startGame()">开始游戏</button>
+        </div>
+    </div>
+    <script src="game.js"></script>
+</body>
+</html>
