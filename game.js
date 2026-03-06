@@ -23,7 +23,7 @@ let keys = {}; // 键盘按键状态
 let mouse = { x: 0, y: 0 }; // 鼠标位置
 let lastZombieSpawn = 0; // 上次生成僵尸的时间戳
 let zombieSpawnInterval = 2000; // 僵尸生成间隔（毫秒）
-let maxZombies = 100; // 保持不动，最大僵尸数量限制，减少僵尸数量提高性能
+let maxZombies = 200; // 保持不动，最大僵尸数量限制，减少僵尸数量提高性能
 let frameCount = 0; // 帧计数器，用于优化绘制
 let audioContext = null; // 音频上下文，用于播放音效
 let mapImage = null; // 地图背景图片
@@ -124,7 +124,13 @@ let freezeZombies = false; // 怪物静止模式
 let infiniteAmmo = false; // 无限子弹模式
 let gameSpeed = 1.0; // 游戏速度，1.0为正常速度
 let showAttackRange = true; // 显示攻击范围
+let friendlyFire = false; // 友伤开关，开启后玩家可能会伤害队友
 let showMapDebug = false; // 显示地图调试模式（灰色可通行/紫色不可通行）
+let cameraScale = 1.2; // 视角缩放比例，默认1.2
+const minCameraScale = 0.8; // 最小缩放比例
+const maxCameraScale = 2.0; // 最大缩放比例
+const cameraScaleStep = 0.1; // 每次缩放的步长
+let cameraOffset = { x: 0, y: 0 }; // 相机偏移量，用于实现相机跟随
 
 // 日志功能
 function addLog(message) {
@@ -417,9 +423,53 @@ class Player {
                         
                         // 限制射击频率
                         if (now - this.aiLastShootTime > this.aiShootInterval / gameSpeed) {
+                            // 检查射击路径上是否有友方玩家（在友伤模式下）
+                            let canShoot = true;
+                            if (friendlyFire) {
+                                // 计算指向目标的方向
+                                const targetDx = closestZombie.x + closestZombie.width / 2 - (this.x + this.width / 2);
+                                const targetDy = closestZombie.y + closestZombie.height / 2 - (this.y + this.height / 2);
+                                const targetDistance = Math.sqrt(targetDx * targetDx + targetDy * targetDy);
+                                const targetDirection = {
+                                    x: targetDx / targetDistance,
+                                    y: targetDy / targetDistance
+                                };
+                                
+                                // 检查友方玩家是否在射击路径上
+                                for (const teammate of players) {
+                                    if (teammate !== this && !teammate.isDead) {
+                                        // 计算队友相对于玩家的位置
+                                        const teammateDx = teammate.x + teammate.width / 2 - (this.x + this.width / 2);
+                                        const teammateDy = teammate.y + teammate.height / 2 - (this.y + this.height / 2);
+                                        const teammateDistance = Math.sqrt(teammateDx * teammateDx + teammateDy * teammateDy);
+                                        
+                                        // 检查队友是否在射击方向上
+                                        if (teammateDistance < targetDistance) {
+                                            // 计算队友相对于射击方向的角度
+                                            const teammateAngle = Math.atan2(teammateDy, teammateDx);
+                                            const shootAngle = Math.atan2(targetDirection.y, targetDirection.x);
+                                            
+                                            // 计算角度差
+                                            let angleDiff = teammateAngle - shootAngle;
+                                            // 规范化角度差到[-π, π]范围内
+                                            while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+                                            while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+                                            
+                                            // 如果角度差小于15度，且队友在射击路径上，则不射击
+                                            if (Math.abs(angleDiff) < Math.PI / 12) {
+                                                canShoot = false;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
                             // 射击
-                            this.shoot();
-                            this.aiLastShootTime = now;
+                            if (canShoot) {
+                                this.shoot();
+                                this.aiLastShootTime = now;
+                            }
                         }
                     }
                 }
@@ -490,13 +540,23 @@ class Player {
             }
         }
         
+        // 检测与油桶的碰撞
+        if (canMoveX) {
+            for (const barrel of barrels) {
+                if (collisionWithVolume(testRectX, barrel)) {
+                    canMoveX = false;
+                    break;
+                }
+            }
+        }
+        
         // 检测与其他玩家的碰撞
         if (canMoveX) {
             for (const player of players) {
                 if (player !== this && !player.isDead) {
                     if (collisionWithVolume(testRectX, player)) {
                         canMoveX = false;
-                        // 推开玩家 - 限制推挤距离，并检查是否会被推入地形
+                        // 推开玩家 - 限制推挤距离，并检查是否会被推入地形或与其他玩家碰撞
                         const pushDistance = Math.min(2, Math.abs(moveX) * 1.5);
                         if (moveX > 0) {
                             const newX = Math.min(canvas.width - player.width, player.x + pushDistance);
@@ -507,6 +567,17 @@ class Player {
                                 if (collisionWithVolume(testPlayerX, obstacle)) {
                                     canPush = false;
                                     break;
+                                }
+                            }
+                            // 检查新位置是否会与其他玩家碰撞
+                            if (canPush) {
+                                for (const otherPlayer of players) {
+                                    if (otherPlayer !== player && otherPlayer !== this && !otherPlayer.isDead) {
+                                        if (collisionWithVolume(testPlayerX, otherPlayer)) {
+                                            canPush = false;
+                                            break;
+                                        }
+                                    }
                                 }
                             }
                             if (canPush) {
@@ -521,6 +592,17 @@ class Player {
                                 if (collisionWithVolume(testPlayerX, obstacle)) {
                                     canPush = false;
                                     break;
+                                }
+                            }
+                            // 检查新位置是否会与其他玩家碰撞
+                            if (canPush) {
+                                for (const otherPlayer of players) {
+                                    if (otherPlayer !== player && otherPlayer !== this && !otherPlayer.isDead) {
+                                        if (collisionWithVolume(testPlayerX, otherPlayer)) {
+                                            canPush = false;
+                                            break;
+                                        }
+                                    }
                                 }
                             }
                             if (canPush) {
@@ -649,13 +731,23 @@ class Player {
             }
         }
         
+        // 检测与油桶的碰撞
+        if (canMoveY) {
+            for (const barrel of barrels) {
+                if (collisionWithVolume(testRectY, barrel)) {
+                    canMoveY = false;
+                    break;
+                }
+            }
+        }
+        
         // 检测与其他玩家的碰撞
         if (canMoveY) {
             for (const player of players) {
                 if (player !== this && !player.isDead) {
                     if (collisionWithVolume(testRectY, player)) {
                         canMoveY = false;
-                        // 推开玩家 - 限制推挤距离，并检查是否会被推入地形
+                        // 推开玩家 - 限制推挤距离，并检查是否会被推入地形或与其他玩家碰撞
                         const pushDistance = Math.min(2, Math.abs(moveY) * 1.5);
                         if (moveY > 0) {
                             const newY = Math.min(canvas.height - player.height, player.y + pushDistance);
@@ -666,6 +758,17 @@ class Player {
                                 if (collisionWithVolume(testPlayerY, obstacle)) {
                                     canPush = false;
                                     break;
+                                }
+                            }
+                            // 检查新位置是否会与其他玩家碰撞
+                            if (canPush) {
+                                for (const otherPlayer of players) {
+                                    if (otherPlayer !== player && otherPlayer !== this && !otherPlayer.isDead) {
+                                        if (collisionWithVolume(testPlayerY, otherPlayer)) {
+                                            canPush = false;
+                                            break;
+                                        }
+                                    }
                                 }
                             }
                             if (canPush) {
@@ -680,6 +783,17 @@ class Player {
                                 if (collisionWithVolume(testPlayerY, obstacle)) {
                                     canPush = false;
                                     break;
+                                }
+                            }
+                            // 检查新位置是否会与其他玩家碰撞
+                            if (canPush) {
+                                for (const otherPlayer of players) {
+                                    if (otherPlayer !== player && otherPlayer !== this && !otherPlayer.isDead) {
+                                        if (collisionWithVolume(testPlayerY, otherPlayer)) {
+                                            canPush = false;
+                                            break;
+                                        }
+                                    }
                                 }
                             }
                             if (canPush) {
@@ -979,12 +1093,22 @@ class Player {
             // 绘制玩家主体
             ctx.fillStyle = this.color;
             ctx.fillRect(this.x, this.y, this.width, this.height);
+            // 主体描边
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(this.x, this.y, this.width, this.height);
             
             // 绘制玩家头部
             ctx.fillStyle = '#f0f0f0';
             ctx.beginPath();
             ctx.arc(this.x + this.width / 2, this.y + this.height / 3, this.width / 4, 0, Math.PI * 2);
             ctx.fill();
+            // 头部描边
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(this.x + this.width / 2, this.y + this.height / 3, this.width / 4, 0, Math.PI * 2);
+            ctx.stroke();
             
             // 绘制玩家武器
             ctx.fillStyle = '#333';
@@ -1241,7 +1365,11 @@ class Player {
             }
         } else {
             // 攻击范围内没有目标，朝正前方射击
-            const direction = this.direction;
+            // 创建一个新的方向对象，避免引用玩家的direction对象导致子弹转弯
+            const direction = {
+                x: this.direction.x,
+                y: this.direction.y
+            };
             
             // 霰弹枪特殊处理
             if (this.currentWeapon === 'shotgun') {
@@ -1670,12 +1798,22 @@ class Zombie {
             }
         }
         
+        // 检测与油桶的碰撞
+        if (canMoveX) {
+            for (const barrel of barrels) {
+                if (collisionWithVolume(testRectX, barrel)) {
+                    canMoveX = false;
+                    break;
+                }
+            }
+        }
+        
         // 检测与玩家的碰撞
         if (canMoveX) {
             for (const player of players) {
                 if (!player.isDead && collisionWithVolume(testRectX, player)) {
                     canMoveX = false;
-                    // 推开玩家 - 限制推挤距离，并检查是否会被推入地形
+                    // 推开玩家 - 限制推挤距离，并检查是否会被推入地形或与其他玩家碰撞
                     const pushDistance = Math.min(2, Math.abs(moveX) * 1.5);
                     if (moveX > 0) {
                         const newX = Math.min(canvas.width - player.width, player.x + pushDistance);
@@ -1686,6 +1824,28 @@ class Zombie {
                             if (collisionWithVolume(testPlayerX, obstacle)) {
                                 canPush = false;
                                 break;
+                            }
+                        }
+                        // 检查新位置是否会与其他玩家碰撞
+                        if (canPush) {
+                            for (const otherPlayer of players) {
+                                if (otherPlayer !== player && !otherPlayer.isDead) {
+                                    if (collisionWithVolume(testPlayerX, otherPlayer)) {
+                                        canPush = false;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        // 检查新位置是否会与其他僵尸（包括BOSS）碰撞
+                        if (canPush) {
+                            for (const zombie of zombies) {
+                                if (!zombie.isDead) {
+                                    if (collisionWithVolume(testPlayerX, zombie)) {
+                                        canPush = false;
+                                        break;
+                                    }
+                                }
                             }
                         }
                         if (canPush) {
@@ -1702,6 +1862,28 @@ class Zombie {
                                 break;
                             }
                         }
+                        // 检查新位置是否会与其他玩家碰撞
+                        if (canPush) {
+                            for (const otherPlayer of players) {
+                                if (otherPlayer !== player && !otherPlayer.isDead) {
+                                    if (collisionWithVolume(testPlayerX, otherPlayer)) {
+                                        canPush = false;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        // 检查新位置是否会与其他僵尸（包括BOSS）碰撞
+                        if (canPush) {
+                            for (const zombie of zombies) {
+                                if (!zombie.isDead) {
+                                    if (collisionWithVolume(testPlayerX, zombie)) {
+                                        canPush = false;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
                         if (canPush) {
                             player.x = newX;
                         }
@@ -1716,7 +1898,7 @@ class Zombie {
             for (const zombie of zombies) {
                 if (zombie !== this && collisionWithVolume(testRectX, zombie)) {
                     canMoveX = false;
-                    // 推开其他僵尸 - 限制推挤距离，并检查是否会被推入地形
+                    // 推开其他僵尸 - 限制推挤距离，并检查是否会被推入地形或与玩家碰撞
                     const pushDistance = Math.min(1, Math.abs(moveX));
                     if (moveX > 0) {
                         const newX = Math.min(canvas.width - zombie.width, zombie.x + pushDistance);
@@ -1727,6 +1909,24 @@ class Zombie {
                             if (collisionWithVolume(testZombieX, obstacle)) {
                                 canPush = false;
                                 break;
+                            }
+                        }
+                        // 检查新位置是否会与玩家碰撞
+                        if (canPush) {
+                            for (const player of players) {
+                                if (!player.isDead && collisionWithVolume(testZombieX, player)) {
+                                    canPush = false;
+                                    break;
+                                }
+                            }
+                        }
+                        // 检查新位置是否会与其他僵尸碰撞
+                        if (canPush) {
+                            for (const otherZombie of zombies) {
+                                if (otherZombie !== zombie && !otherZombie.isDead && collisionWithVolume(testZombieX, otherZombie)) {
+                                    canPush = false;
+                                    break;
+                                }
                             }
                         }
                         if (canPush) {
@@ -1741,6 +1941,24 @@ class Zombie {
                             if (collisionWithVolume(testZombieX, obstacle)) {
                                 canPush = false;
                                 break;
+                            }
+                        }
+                        // 检查新位置是否会与玩家碰撞
+                        if (canPush) {
+                            for (const player of players) {
+                                if (!player.isDead && collisionWithVolume(testZombieX, player)) {
+                                    canPush = false;
+                                    break;
+                                }
+                            }
+                        }
+                        // 检查新位置是否会与其他僵尸碰撞
+                        if (canPush) {
+                            for (const otherZombie of zombies) {
+                                if (otherZombie !== zombie && !otherZombie.isDead && collisionWithVolume(testZombieX, otherZombie)) {
+                                    canPush = false;
+                                    break;
+                                }
                             }
                         }
                         if (canPush) {
@@ -1762,12 +1980,22 @@ class Zombie {
             }
         }
         
+        // 检测与油桶的碰撞
+        if (canMoveY) {
+            for (const barrel of barrels) {
+                if (collisionWithVolume(testRectY, barrel)) {
+                    canMoveY = false;
+                    break;
+                }
+            }
+        }
+        
         // 检测与玩家的碰撞
         if (canMoveY) {
             for (const player of players) {
                 if (!player.isDead && collisionWithVolume(testRectY, player)) {
                     canMoveY = false;
-                    // 推开玩家 - 限制推挤距离，并检查是否会被推入地形
+                    // 推开玩家 - 限制推挤距离，并检查是否会被推入地形或与其他玩家碰撞
                     const pushDistance = Math.min(2, Math.abs(moveY) * 1.5);
                     if (moveY > 0) {
                         const newY = Math.min(canvas.height - player.height, player.y + pushDistance);
@@ -1778,6 +2006,28 @@ class Zombie {
                             if (collisionWithVolume(testPlayerY, obstacle)) {
                                 canPush = false;
                                 break;
+                            }
+                        }
+                        // 检查新位置是否会与其他玩家碰撞
+                        if (canPush) {
+                            for (const otherPlayer of players) {
+                                if (otherPlayer !== player && !otherPlayer.isDead) {
+                                    if (collisionWithVolume(testPlayerY, otherPlayer)) {
+                                        canPush = false;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        // 检查新位置是否会与其他僵尸（包括BOSS）碰撞
+                        if (canPush) {
+                            for (const zombie of zombies) {
+                                if (!zombie.isDead) {
+                                    if (collisionWithVolume(testPlayerY, zombie)) {
+                                        canPush = false;
+                                        break;
+                                    }
+                                }
                             }
                         }
                         if (canPush) {
@@ -1794,6 +2044,28 @@ class Zombie {
                                 break;
                             }
                         }
+                        // 检查新位置是否会与其他玩家碰撞
+                        if (canPush) {
+                            for (const otherPlayer of players) {
+                                if (otherPlayer !== player && !otherPlayer.isDead) {
+                                    if (collisionWithVolume(testPlayerY, otherPlayer)) {
+                                        canPush = false;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        // 检查新位置是否会与其他僵尸（包括BOSS）碰撞
+                        if (canPush) {
+                            for (const zombie of zombies) {
+                                if (!zombie.isDead) {
+                                    if (collisionWithVolume(testPlayerY, zombie)) {
+                                        canPush = false;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
                         if (canPush) {
                             player.y = newY;
                         }
@@ -1808,7 +2080,7 @@ class Zombie {
             for (const zombie of zombies) {
                 if (zombie !== this && collisionWithVolume(testRectY, zombie)) {
                     canMoveY = false;
-                    // 推开其他僵尸 - 限制推挤距离，并检查是否会被推入地形
+                    // 推开其他僵尸 - 限制推挤距离，并检查是否会被推入地形或与玩家碰撞
                     const pushDistance = Math.min(1, Math.abs(moveY));
                     if (moveY > 0) {
                         const newY = Math.min(canvas.height - zombie.height, zombie.y + pushDistance);
@@ -1819,6 +2091,24 @@ class Zombie {
                             if (collisionWithVolume(testZombieY, obstacle)) {
                                 canPush = false;
                                 break;
+                            }
+                        }
+                        // 检查新位置是否会与玩家碰撞
+                        if (canPush) {
+                            for (const player of players) {
+                                if (!player.isDead && collisionWithVolume(testZombieY, player)) {
+                                    canPush = false;
+                                    break;
+                                }
+                            }
+                        }
+                        // 检查新位置是否会与其他僵尸碰撞
+                        if (canPush) {
+                            for (const otherZombie of zombies) {
+                                if (otherZombie !== zombie && !otherZombie.isDead && collisionWithVolume(testZombieY, otherZombie)) {
+                                    canPush = false;
+                                    break;
+                                }
                             }
                         }
                         if (canPush) {
@@ -1833,6 +2123,24 @@ class Zombie {
                             if (collisionWithVolume(testZombieY, obstacle)) {
                                 canPush = false;
                                 break;
+                            }
+                        }
+                        // 检查新位置是否会与玩家碰撞
+                        if (canPush) {
+                            for (const player of players) {
+                                if (!player.isDead && collisionWithVolume(testZombieY, player)) {
+                                    canPush = false;
+                                    break;
+                                }
+                            }
+                        }
+                        // 检查新位置是否会与其他僵尸碰撞
+                        if (canPush) {
+                            for (const otherZombie of zombies) {
+                                if (otherZombie !== zombie && !otherZombie.isDead && collisionWithVolume(testZombieY, otherZombie)) {
+                                    canPush = false;
+                                    break;
+                                }
                             }
                         }
                         if (canPush) {
@@ -1884,9 +2192,19 @@ class Zombie {
             ctx.beginPath();
             ctx.arc(0, 0, this.width / 2, 0, Math.PI * 2);
             ctx.fill();
+            // BOSS身体描边
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(0, 0, this.width / 2, 0, Math.PI * 2);
+            ctx.stroke();
         } else {
             // 普通僵尸绘制为矩形
             ctx.fillRect(-this.width / 2, -this.height / 2, this.width, this.height);
+            // 普通僵尸身体描边
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(-this.width / 2, -this.height / 2, this.width, this.height);
         }
         
         // 绘制僵尸头部 - 椭圆形，窄边对着前方（Y轴负方向）
@@ -1894,6 +2212,12 @@ class Zombie {
         ctx.beginPath();
         ctx.ellipse(0, -this.height / 2 - this.width / 8, this.width / 8, this.width / 4, 0, 0, Math.PI * 2);
         ctx.fill();
+        // 头部描边
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.ellipse(0, -this.height / 2 - this.width / 8, this.width / 8, this.width / 4, 0, 0, Math.PI * 2);
+        ctx.stroke();
         
         // 绘制僵尸眼睛 - 在头部前方，左右排列
         ctx.fillStyle = '#ff0000';
@@ -1906,6 +2230,13 @@ class Zombie {
         ctx.arc(eyeX - eyeOffset, eyeY, eyeRadius, 0, Math.PI * 2);
         ctx.arc(eyeX + eyeOffset, eyeY, eyeRadius, 0, Math.PI * 2);
         ctx.fill();
+        // 眼睛描边
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(eyeX - eyeOffset, eyeY, eyeRadius, 0, Math.PI * 2);
+        ctx.arc(eyeX + eyeOffset, eyeY, eyeRadius, 0, Math.PI * 2);
+        ctx.stroke();
         
         // 绘制僵尸手臂 - 向前伸出
         ctx.fillStyle = this.color;
@@ -1927,6 +2258,16 @@ class Zombie {
         ctx.lineTo(-armXOffset + armWidth, armYOffset);
         ctx.closePath();
         ctx.fill();
+        // 左手臂描边
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-armXOffset, armYOffset);
+        ctx.lineTo(-armXOffset, armYOffset - armLength);
+        ctx.lineTo(-armXOffset + armWidth, armYOffset - armLength);
+        ctx.lineTo(-armXOffset + armWidth, armYOffset);
+        ctx.closePath();
+        ctx.stroke();
         
         // 右手臂 - 从身体右侧向前伸出
         ctx.beginPath();
@@ -1936,6 +2277,16 @@ class Zombie {
         ctx.lineTo(armXOffset, armYOffset);
         ctx.closePath();
         ctx.fill();
+        // 右手臂描边
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(armXOffset - armWidth, armYOffset);
+        ctx.lineTo(armXOffset - armWidth, armYOffset - armLength);
+        ctx.lineTo(armXOffset, armYOffset - armLength);
+        ctx.lineTo(armXOffset, armYOffset);
+        ctx.closePath();
+        ctx.stroke();
         
         ctx.restore();
         
@@ -1955,13 +2306,15 @@ class Zombie {
         }
         
         // 绘制攻击范围（红色半透明圆圈）- 圆心向前偏移，更符合手臂攻击范围
-        const attackCenterX = this.x + this.width / 2 + this.direction.x * (this.height);
-        const attackCenterY = this.y + this.height / 2 + this.direction.y * (this.height);
-        ctx.beginPath();
-        ctx.arc(attackCenterX, attackCenterY, this.attackRange, 0, Math.PI * 2);
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = 'rgba(255, 0, 0, 0.3)';
-        ctx.stroke();
+        if (showAttackRange) {
+            const attackCenterX = this.x + this.width / 2 + this.direction.x * (this.height);
+            const attackCenterY = this.y + this.height / 2 + this.direction.y * (this.height);
+            ctx.beginPath();
+            ctx.arc(attackCenterX, attackCenterY, this.attackRange, 0, Math.PI * 2);
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = 'rgba(255, 0, 0, 0.3)';
+            ctx.stroke();
+        }
         
         // 绘制碰撞体积（红色线条）
         if (showAttackRange) {
@@ -2095,6 +2448,11 @@ window.addEventListener('keydown', (e) => {
                 infiniteAmmo = !infiniteAmmo;
                 addLog(infiniteAmmo ? '启用无限子弹模式' : '禁用无限子弹模式');
             }
+            // 数字键7：开关友伤机制（使用e.code确保只响应普通数字键）
+            else if (e.code === 'Digit7') {
+                friendlyFire = !friendlyFire;
+                addLog(friendlyFire ? '启用友伤机制' : '禁用友伤机制');
+            }
             // 数字键8：开关地图调试模式（使用e.code确保只响应普通数字键）
             else if (e.code === 'Digit8') {
                 showMapDebug = !showMapDebug;
@@ -2106,6 +2464,16 @@ window.addEventListener('keydown', (e) => {
                 showAttackRange = !showAttackRange;
                 addLog(showAttackRange ? '显示攻击范围' : '隐藏攻击范围');
                 console.log('切换后状态:', showAttackRange);
+            }
+            // 【键：视角缩小
+            else if (e.key === '【' || e.key === '[') {
+                cameraScale = Math.max(minCameraScale, cameraScale - cameraScaleStep);
+                addLog(`视角缩小至 ${cameraScale.toFixed(1)}x`);
+            }
+            // 】键：视角放大
+            else if (e.key === '】' || e.key === ']') {
+                cameraScale = Math.min(maxCameraScale, cameraScale + cameraScaleStep);
+                addLog(`视角放大至 ${cameraScale.toFixed(1)}x`);
             }
             // 加号键：加速游戏
             else if (e.key === '+' || e.key === '=') {
@@ -2245,6 +2613,78 @@ function gameLoop() {
     // 重新绘制画布，解决拖影问题
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
+    // 计算相机偏移量，实现相机跟随
+    if (cameraScale > 1.0 && players.length > 0) {
+        // 计算所有存活玩家的平均位置
+        let alivePlayers = players.filter(player => !player.isDead);
+        if (alivePlayers.length > 0) {
+            let avgX = 0;
+            let avgY = 0;
+            for (const player of alivePlayers) {
+                avgX += player.x + player.width / 2;
+                avgY += player.y + player.height / 2;
+            }
+            avgX /= alivePlayers.length;
+            avgY /= alivePlayers.length;
+            
+            // 计算相机目标偏移量，使玩家保持在屏幕中心
+            const targetOffsetX = (canvas.width / 2 - avgX) * (cameraScale - 1);
+            const targetOffsetY = (canvas.height / 2 - avgY) * (cameraScale - 1);
+            
+            // 平滑相机移动
+            cameraOffset.x += (targetOffsetX - cameraOffset.x) * 0.1;
+            cameraOffset.y += (targetOffsetY - cameraOffset.y) * 0.1;
+            
+            // 当有两个或更多玩家时，检查玩家之间的距离
+            if (alivePlayers.length >= 2) {
+                // 计算玩家之间的最大距离
+                let maxDistance = 0;
+                for (let i = 0; i < alivePlayers.length; i++) {
+                    for (let j = i + 1; j < alivePlayers.length; j++) {
+                        const player1 = alivePlayers[i];
+                        const player2 = alivePlayers[j];
+                        const dx = (player1.x + player1.width / 2) - (player2.x + player2.width / 2);
+                        const dy = (player1.y + player1.height / 2) - (player2.y + player2.height / 2);
+                        const distance = Math.sqrt(dx * dx + dy * dy);
+                        if (distance > maxDistance) {
+                            maxDistance = distance;
+                        }
+                    }
+                }
+                
+                // 计算屏幕对角线长度
+                const screenDiagonal = Math.sqrt(canvas.width * canvas.width + canvas.height * canvas.height);
+                // 当玩家距离超过屏幕对角线的70%时，自动缩小视角
+                const distanceThreshold = screenDiagonal * 0.7 / cameraScale;
+                if (maxDistance > distanceThreshold && cameraScale > minCameraScale) {
+                    // 缓慢缩小视角
+                    cameraScale = Math.max(minCameraScale, cameraScale - 0.01);
+                    addLog(`玩家距离过远，自动缩小视角至 ${cameraScale.toFixed(1)}x`);
+                }
+                // 当玩家距离较近时，自动放大视角恢复到默认值
+                else if (maxDistance < distanceThreshold * 0.5 && cameraScale < 1.2) {
+                    // 缓慢放大视角
+                    cameraScale = Math.min(1.2, cameraScale + 0.01);
+                    addLog(`玩家距离较近，自动放大视角至 ${cameraScale.toFixed(1)}x`);
+                }
+            }
+        }
+    } else {
+        // 当缩放比例为1或没有玩家时，重置相机偏移
+        cameraOffset.x = 0;
+        cameraOffset.y = 0;
+    }
+    
+    // 应用视角缩放和相机偏移
+    ctx.save();
+    // 计算缩放后的中心点
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    // 移动到中心点，缩放，然后移回并应用相机偏移
+    ctx.translate(centerX, centerY);
+    ctx.scale(cameraScale, cameraScale);
+    ctx.translate(-centerX + cameraOffset.x, -centerY + cameraOffset.y);
+    
     // 绘制地图背景
     if (mapImage) {
         try {
@@ -2350,6 +2790,10 @@ function gameLoop() {
             // 绘制急救包（白色矩形）
             ctx.fillStyle = '#ffffff';
             ctx.fillRect(medkit.x, medkit.y, medkit.width, medkit.height);
+            // 急救包描边
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(medkit.x, medkit.y, medkit.width, medkit.height);
             
             // 绘制红色+号
             ctx.strokeStyle = '#ff4444';
@@ -2404,11 +2848,84 @@ function gameLoop() {
                             player.isFlashing = true;
                             player.lastHitTime = Date.now();
                             player.lastFlashTime = Date.now();
-                            // 非无敌模式下执行僵尸击退（除非静止模式）
+                            // 非无敌模式下执行僵尸和玩家的击退（除非静止模式）
                             if (!freezeZombies) {
                                 // 僵尸被击退
                                 zombie.x -= (zombie.x - player.x) / 10;
                                 zombie.y -= (zombie.y - player.y) / 10;
+                                
+                                // 玩家被击退
+                                const playerKnockbackDistance = 5;
+                                const playerKnockbackX = (zombie.x - player.x) / 10 * playerKnockbackDistance;
+                                const playerKnockbackY = (zombie.y - player.y) / 10 * playerKnockbackDistance;
+                                
+                                // 计算玩家的新位置
+                                const newPlayerX = player.x + playerKnockbackX;
+                                const newPlayerY = player.y + playerKnockbackY;
+                                
+                                // 检查新位置是否会与其他玩家碰撞
+                                let canKnockback = true;
+                                for (const otherPlayer of players) {
+                                    if (otherPlayer !== player && !otherPlayer.isDead) {
+                                        // 检查碰撞
+                                        const testPlayer = {
+                                            x: newPlayerX,
+                                            y: newPlayerY,
+                                            width: player.width,
+                                            height: player.height,
+                                            collisionRadius: player.collisionRadius
+                                        };
+                                        if (collisionWithVolume(testPlayer, otherPlayer)) {
+                                            canKnockback = false;
+                                            break;
+                                        }
+                                    }
+                                }
+                                
+                                // 检查新位置是否会与障碍物碰撞
+                                if (canKnockback) {
+                                    for (const obstacle of obstacles) {
+                                        const testPlayer = {
+                                            x: newPlayerX,
+                                            y: newPlayerY,
+                                            width: player.width,
+                                            height: player.height,
+                                            collisionRadius: player.collisionRadius
+                                        };
+                                        if (collisionWithVolume(testPlayer, obstacle)) {
+                                            canKnockback = false;
+                                            break;
+                                        }
+                                    }
+                                }
+                                
+                                // 检查新位置是否会与其他僵尸（包括BOSS）碰撞
+                                if (canKnockback) {
+                                    for (const zombie of zombies) {
+                                        if (!zombie.isDead) {
+                                            const testPlayer = {
+                                                x: newPlayerX,
+                                                y: newPlayerY,
+                                                width: player.width,
+                                                height: player.height,
+                                                collisionRadius: player.collisionRadius
+                                            };
+                                            if (collisionWithVolume(testPlayer, zombie)) {
+                                                canKnockback = false;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // 检查新位置是否在画布范围内
+                                if (canKnockback) {
+                                    if (newPlayerX >= 0 && newPlayerX <= canvas.width - player.width &&
+                                        newPlayerY >= 0 && newPlayerY <= canvas.height - player.height) {
+                                        player.x = newPlayerX;
+                                        player.y = newPlayerY;
+                                    }
+                                }
                             }
                         }
                     }
@@ -2524,6 +3041,99 @@ function gameLoop() {
                 }
             }
             
+            // 检测子弹与玩家碰撞（友伤机制）
+            for (let j = players.length - 1; j >= 0; j--) {
+                const player = players[j];
+                if (player !== bullet.player && collisionWithVolume(bullet, player) && !player.isDead) {
+                    // 只有在友伤模式下才会伤害队友
+                    if (friendlyFire) {
+                        const damage = bullet.damage || 25;
+                        player.health = Math.max(0, player.health - damage);
+                        createDamageText(player.x + player.width / 2, player.y, damage);
+                        // 设置无敌时间
+                        player.isInvulnerable = true;
+                        player.isFlashing = true;
+                        player.lastHitTime = Date.now();
+                        player.lastFlashTime = Date.now();
+                        
+                        // 玩家被击退
+                        const playerKnockbackDistance = 5;
+                        const playerKnockbackX = bullet.direction.x * playerKnockbackDistance;
+                        const playerKnockbackY = bullet.direction.y * playerKnockbackDistance;
+                        
+                        // 计算玩家的新位置
+                        const newPlayerX = player.x + playerKnockbackX;
+                        const newPlayerY = player.y + playerKnockbackY;
+                        
+                        // 检查新位置是否会与其他玩家碰撞
+                        let canKnockback = true;
+                        for (const otherPlayer of players) {
+                            if (otherPlayer !== player && !otherPlayer.isDead) {
+                                // 检查碰撞
+                                const testPlayer = {
+                                    x: newPlayerX,
+                                    y: newPlayerY,
+                                    width: player.width,
+                                    height: player.height,
+                                    collisionRadius: player.collisionRadius
+                                };
+                                if (collisionWithVolume(testPlayer, otherPlayer)) {
+                                    canKnockback = false;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        // 检查新位置是否会与障碍物碰撞
+                        if (canKnockback) {
+                            for (const obstacle of obstacles) {
+                                const testPlayer = {
+                                    x: newPlayerX,
+                                    y: newPlayerY,
+                                    width: player.width,
+                                    height: player.height,
+                                    collisionRadius: player.collisionRadius
+                                };
+                                if (collisionWithVolume(testPlayer, obstacle)) {
+                                    canKnockback = false;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        // 检查新位置是否会与其他僵尸（包括BOSS）碰撞
+                        if (canKnockback) {
+                            for (const zombie of zombies) {
+                                if (!zombie.isDead) {
+                                    const testPlayer = {
+                                        x: newPlayerX,
+                                        y: newPlayerY,
+                                        width: player.width,
+                                        height: player.height,
+                                        collisionRadius: player.collisionRadius
+                                    };
+                                    if (collisionWithVolume(testPlayer, zombie)) {
+                                        canKnockback = false;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // 检查新位置是否在画布范围内
+                        if (canKnockback) {
+                            if (newPlayerX >= 0 && newPlayerX <= canvas.width - player.width &&
+                                newPlayerY >= 0 && newPlayerY <= canvas.height - player.height) {
+                                player.x = newPlayerX;
+                                player.y = newPlayerY;
+                            }
+                        }
+                    }
+                    bulletHit = true;
+                    break;
+                }
+            }
+            
             // 子弹出界或击中目标
             if (bulletHit || bullet.x < 0 || bullet.x > canvas.width || bullet.y < 0 || bullet.y > canvas.height) {
                 bullets.splice(i, 1);
@@ -2538,16 +3148,32 @@ function gameLoop() {
             // 绘制主体
             ctx.fillStyle = '#888';
             ctx.fillRect(barrel.x, barrel.y, barrel.width, barrel.height);
+            // 主体描边
+            ctx.strokeStyle = '#666';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(barrel.x, barrel.y, barrel.width, barrel.height);
             
             // 绘制顶部和底部
             ctx.fillStyle = '#666';
             ctx.beginPath();
             ctx.ellipse(barrel.x + barrel.width / 2, barrel.y, barrel.width / 2, barrel.height / 4, 0, 0, Math.PI * 2);
             ctx.fill();
+            // 顶部描边
+            ctx.strokeStyle = '#555';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.ellipse(barrel.x + barrel.width / 2, barrel.y, barrel.width / 2, barrel.height / 4, 0, 0, Math.PI * 2);
+            ctx.stroke();
             
             ctx.beginPath();
             ctx.ellipse(barrel.x + barrel.width / 2, barrel.y + barrel.height, barrel.width / 2, barrel.height / 4, 0, 0, Math.PI * 2);
             ctx.fill();
+            // 底部描边
+            ctx.strokeStyle = '#555';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.ellipse(barrel.x + barrel.width / 2, barrel.y + barrel.height, barrel.width / 2, barrel.height / 4, 0, 0, Math.PI * 2);
+            ctx.stroke();
             
             // 绘制碰撞体积（红色线条）
             if (showAttackRange) {
@@ -2656,6 +3282,10 @@ function gameLoop() {
             // 绘制急救包（白色矩形）
             ctx.fillStyle = '#ffffff';
             ctx.fillRect(medkit.x, medkit.y, medkit.width, medkit.height);
+            // 急救包描边
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(medkit.x, medkit.y, medkit.width, medkit.height);
             
             // 绘制红色+号
             ctx.strokeStyle = '#ff4444';
@@ -2681,16 +3311,32 @@ function gameLoop() {
             // 绘制主体
             ctx.fillStyle = '#888';
             ctx.fillRect(barrel.x, barrel.y, barrel.width, barrel.height);
+            // 主体描边
+            ctx.strokeStyle = '#666';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(barrel.x, barrel.y, barrel.width, barrel.height);
             
             // 绘制顶部和底部
             ctx.fillStyle = '#666';
             ctx.beginPath();
             ctx.ellipse(barrel.x + barrel.width / 2, barrel.y, barrel.width / 2, barrel.height / 4, 0, 0, Math.PI * 2);
             ctx.fill();
+            // 顶部描边
+            ctx.strokeStyle = '#555';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.ellipse(barrel.x + barrel.width / 2, barrel.y, barrel.width / 2, barrel.height / 4, 0, 0, Math.PI * 2);
+            ctx.stroke();
             
             ctx.beginPath();
             ctx.ellipse(barrel.x + barrel.width / 2, barrel.y + barrel.height, barrel.width / 2, barrel.height / 4, 0, 0, Math.PI * 2);
             ctx.fill();
+            // 底部描边
+            ctx.strokeStyle = '#555';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.ellipse(barrel.x + barrel.width / 2, barrel.y + barrel.height, barrel.width / 2, barrel.height / 4, 0, 0, Math.PI * 2);
+            ctx.stroke();
             
             // 绘制碰撞体积（红色线条）
             if (showAttackRange) {
@@ -2722,6 +3368,9 @@ function gameLoop() {
         ctx.font = '24px Arial';
         ctx.fillText('按 ESC 键继续游戏', canvas.width / 2, canvas.height / 2 + 50);
     }
+    
+    // 恢复画布状态
+    ctx.restore();
     
     requestAnimationFrame(gameLoop);
 }
@@ -2764,13 +3413,90 @@ function explodeBarrel(barrel) {
                 Math.pow(player.y + player.height / 2 - centerY, 2)
             );
             if (distance <= barrelExplosionRadius) {
-                player.health = Math.max(0, player.health - barrelExplosionDamage);
-                createDamageText(player.x + player.width / 2, player.y, barrelExplosionDamage);
-                // 设置无敌时间
-                player.isInvulnerable = true;
-                player.isFlashing = true;
-                player.lastHitTime = Date.now();
-                player.lastFlashTime = Date.now();
+                // 只有在友伤模式下才会伤害玩家
+                if (friendlyFire) {
+                    player.health = Math.max(0, player.health - barrelExplosionDamage);
+                    createDamageText(player.x + player.width / 2, player.y, barrelExplosionDamage);
+                    // 设置无敌时间
+                    player.isInvulnerable = true;
+                    player.isFlashing = true;
+                    player.lastHitTime = Date.now();
+                    player.lastFlashTime = Date.now();
+                    
+                    // 玩家被击退
+                    const playerKnockbackDistance = 5;
+                    // 计算爆炸中心到玩家的方向
+                    const knockbackX = (player.x + player.width / 2 - centerX) / distance * playerKnockbackDistance;
+                    const knockbackY = (player.y + player.height / 2 - centerY) / distance * playerKnockbackDistance;
+                    
+                    // 计算玩家的新位置
+                    const newPlayerX = player.x + knockbackX;
+                    const newPlayerY = player.y + knockbackY;
+                    
+                    // 检查新位置是否会与其他玩家碰撞
+                    let canKnockback = true;
+                    for (const otherPlayer of players) {
+                        if (otherPlayer !== player && !otherPlayer.isDead) {
+                            // 检查碰撞
+                            const testPlayer = {
+                                x: newPlayerX,
+                                y: newPlayerY,
+                                width: player.width,
+                                height: player.height,
+                                collisionRadius: player.collisionRadius
+                            };
+                            if (collisionWithVolume(testPlayer, otherPlayer)) {
+                                canKnockback = false;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // 检查新位置是否会与障碍物碰撞
+                        if (canKnockback) {
+                            for (const obstacle of obstacles) {
+                                const testPlayer = {
+                                    x: newPlayerX,
+                                    y: newPlayerY,
+                                    width: player.width,
+                                    height: player.height,
+                                    collisionRadius: player.collisionRadius
+                                };
+                                if (collisionWithVolume(testPlayer, obstacle)) {
+                                    canKnockback = false;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        // 检查新位置是否会与其他僵尸（包括BOSS）碰撞
+                        if (canKnockback) {
+                            for (const zombie of zombies) {
+                                if (!zombie.isDead) {
+                                    const testPlayer = {
+                                        x: newPlayerX,
+                                        y: newPlayerY,
+                                        width: player.width,
+                                        height: player.height,
+                                        collisionRadius: player.collisionRadius
+                                    };
+                                    if (collisionWithVolume(testPlayer, zombie)) {
+                                        canKnockback = false;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // 检查新位置是否在画布范围内
+                        if (canKnockback) {
+                            if (newPlayerX >= 0 && newPlayerX <= canvas.width - player.width &&
+                                newPlayerY >= 0 && newPlayerY <= canvas.height - player.height) {
+                                player.x = newPlayerX;
+                                player.y = newPlayerY;
+                            }
+                        }
+                }
             }
         }
     }
