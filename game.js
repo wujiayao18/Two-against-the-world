@@ -26,124 +26,26 @@ let zombieSpawnInterval = 2000; // 僵尸生成间隔（毫秒）
 let maxZombies = 100; // 保持不动，最大僵尸数量限制，减少僵尸数量提高性能
 let frameCount = 0; // 帧计数器，用于优化绘制
 let audioContext = null; // 音频上下文，用于播放音效
+let mapImage = null; // 地图背景图片
 
 // 武器配置
 let WEAPON_CONFIG = {};
 
 // 从CSV文件加载武器配置
+// 加载武器配置（从嵌入的常量读取）
 async function loadWeaponsFromCSV() {
     try {
         console.log('开始加载武器配置...');
-        const response = await fetch('weapons.csv');
-        const csvText = await response.text();
-        console.log('CSV内容:', csvText);
         
-        // 解析CSV
-        const lines = csvText.trim().split('\n');
-        const headers = lines[0].split(',');
-        
-        // 清空现有配置
-        WEAPON_CONFIG = {};
-        
-        for (let i = 1; i < lines.length; i++) {
-            const line = lines[i].trim();
-            // 跳过空行和注释行
-            if (!line || line.startsWith('#')) {
-                continue;
-            }
-            
-            const values = line.split(',');
-            const weaponId = values[0];
-            
-            // 跳过第二行（注释行）
-            if (i === 1 && isNaN(parseInt(values[2]))) {
-                console.log('跳过注释行:', line);
-                continue;
-            }
-            
-            // 确保有足够的列
-            if (values.length >= 10) {
-                WEAPON_CONFIG[weaponId] = {
-                    name: values[1],
-                    damage: parseInt(values[2]),
-                    fireRate: parseInt(values[3]),
-                    bulletSpeed: parseInt(values[4]),
-                    magazineSize: parseInt(values[5]),
-                    currentAmmo: parseInt(values[6]),
-                    reloadTime: parseInt(values[7]),
-                    knockback: parseInt(values[8]),
-                    range: parseInt(values[9])
-                };
-                console.log('加载武器:', weaponId, WEAPON_CONFIG[weaponId]);
-            } else {
-                console.warn('跳过格式不正确的行:', line);
-            }
+        if (typeof WEAPON_DATA === 'undefined') {
+            throw new Error('WEAPON_DATA not found');
         }
+        
+        // 直接使用WEAPON_DATA
+        WEAPON_CONFIG = WEAPON_DATA;
         
         console.log('武器配置加载成功:', WEAPON_CONFIG);
-        
-        // 如果没有加载到任何武器，使用默认配置
-        if (Object.keys(WEAPON_CONFIG).length === 0) {
-            console.log('没有加载到武器配置，使用默认配置');
-            WEAPON_CONFIG = {
-                pistol: {
-                    name: '普通手枪',
-                    damage: 25,
-                    fireRate: 200,
-                    bulletSpeed: 8,
-                    magazineSize: -1,
-                    currentAmmo: -1,
-                    reloadTime: 1000,
-                    knockback: 5,
-                    range: 300
-                },
-                magnum: {
-                    name: '马格南',
-                    damage: 50,
-                    fireRate: 400,
-                    bulletSpeed: 10,
-                    magazineSize: 6,
-                    currentAmmo: 6,
-                    reloadTime: 1500,
-                    knockback: 10,
-                    range: 350
-                },
-                uzi: {
-                    name: 'UZI冲锋枪',
-                    damage: 15,
-                    fireRate: 50,
-                    bulletSpeed: 7,
-                    magazineSize: 50,
-                    currentAmmo: 50,
-                    reloadTime: 1200,
-                    knockback: 3,
-                    range: 250
-                },
-                rifle: {
-                    name: '突击步枪',
-                    damage: 30,
-                    fireRate: 150,
-                    bulletSpeed: 9,
-                    magazineSize: 20,
-                    currentAmmo: 20,
-                    reloadTime: 1300,
-                    knockback: 7,
-                    range: 400
-                },
-                shotgun: {
-                    name: '霰弹枪',
-                    damage: 20,
-                    fireRate: 300,
-                    bulletSpeed: 6,
-                    magazineSize: 8,
-                    currentAmmo: 8,
-                    reloadTime: 1400,
-                    knockback: 8,
-                    range: 150
-                }
-            };
-            console.log('使用默认武器配置:', WEAPON_CONFIG);
-        }
+        console.log('已加载武器数量:', Object.keys(WEAPON_CONFIG).length);
     } catch (error) {
         console.error('加载武器配置失败:', error);
         // 加载失败时使用默认配置
@@ -157,7 +59,8 @@ async function loadWeaponsFromCSV() {
                 currentAmmo: -1,
                 reloadTime: 1000,
                 knockback: 5,
-                range: 300
+                range: 300,
+                shotgunPellets: 1
             },
             magnum: {
                 name: '马格南',
@@ -168,7 +71,8 @@ async function loadWeaponsFromCSV() {
                 currentAmmo: 6,
                 reloadTime: 1500,
                 knockback: 10,
-                range: 350
+                range: 350,
+                shotgunPellets: 1
             },
             uzi: {
                 name: 'UZI冲锋枪',
@@ -179,7 +83,8 @@ async function loadWeaponsFromCSV() {
                 currentAmmo: 50,
                 reloadTime: 1200,
                 knockback: 3,
-                range: 250
+                range: 250,
+                shotgunPellets: 1
             },
             rifle: {
                 name: '突击步枪',
@@ -190,7 +95,8 @@ async function loadWeaponsFromCSV() {
                 currentAmmo: 20,
                 reloadTime: 1300,
                 knockback: 7,
-                range: 400
+                range: 400,
+                shotgunPellets: 1
             },
             shotgun: {
                 name: '霰弹枪',
@@ -201,7 +107,8 @@ async function loadWeaponsFromCSV() {
                 currentAmmo: 8,
                 reloadTime: 1400,
                 knockback: 8,
-                range: 150
+                range: 150,
+                shotgunPellets: 8
             }
         };
         console.log('使用默认武器配置:', WEAPON_CONFIG);
@@ -217,6 +124,7 @@ let freezeZombies = false; // 怪物静止模式
 let infiniteAmmo = false; // 无限子弹模式
 let gameSpeed = 1.0; // 游戏速度，1.0为正常速度
 let showAttackRange = true; // 显示攻击范围
+let showMapDebug = false; // 显示地图调试模式（灰色可通行/紫色不可通行）
 
 // 日志功能
 function addLog(message) {
@@ -1287,8 +1195,10 @@ class Player {
             
             // 霰弹枪特殊处理
             if (this.currentWeapon === 'shotgun') {
-                // 霰弹枪发射5发子弹，呈扇形分布
-                for (let i = -2; i <= 2; i++) {
+                // 霰弹枪发射多颗子弹，呈扇形分布
+                const pelletCount = weapon.shotgunPellets || 5;
+                const halfCount = Math.floor(pelletCount / 2);
+                for (let i = -halfCount; i <= halfCount; i++) {
                     const angle = i * 0.1; // 每发子弹的角度偏移
                     const shotDirection = {
                         x: targetDirection.x * Math.cos(angle) - targetDirection.y * Math.sin(angle),
@@ -1335,8 +1245,10 @@ class Player {
             
             // 霰弹枪特殊处理
             if (this.currentWeapon === 'shotgun') {
-                // 霰弹枪发射5发子弹，呈扇形分布
-                for (let i = -2; i <= 2; i++) {
+                // 霰弹枪发射多颗子弹，呈扇形分布
+                const pelletCount = weapon.shotgunPellets || 5;
+                const halfCount = Math.floor(pelletCount / 2);
+                for (let i = -halfCount; i <= halfCount; i++) {
                     const angle = i * 0.1; // 每发子弹的角度偏移
                     const shotDirection = {
                         x: direction.x * Math.cos(angle) - direction.y * Math.sin(angle),
@@ -1421,25 +1333,10 @@ class Player {
 
 class Zombie {
     constructor(isBoss = false) {
-        // 从屏幕边缘随机生成
-        const side = Math.floor(Math.random() * 4);
-        if (side === 0) {
-            // 顶部
-            this.x = Math.random() * canvas.width; // 僵尸X坐标
-            this.y = -50; // 僵尸Y坐标
-        } else if (side === 1) {
-            // 右侧
-            this.x = canvas.width + 50; // 僵尸X坐标
-            this.y = Math.random() * canvas.height; // 僵尸Y坐标
-        } else if (side === 2) {
-            // 底部
-            this.x = Math.random() * canvas.width; // 僵尸X坐标
-            this.y = canvas.height + 50; // 僵尸Y坐标
-        } else {
-            // 左侧
-            this.x = -50; // 僵尸X坐标
-            this.y = Math.random() * canvas.height; // 僵尸Y坐标
-        }
+        // 从与可通行区域相连的边缘生成
+        const spawnPos = this.findValidSpawnPosition();
+        this.x = spawnPos.x;
+        this.y = spawnPos.y;
         
         this.isBoss = isBoss; // 是否为BOSS僵尸
         if (isBoss) {
@@ -1477,6 +1374,79 @@ class Zombie {
         this.isAttacking = false; // 是否正在攻击
         this.attackAnimationTime = 200; // 攻击动画持续时间
         this.attackStartTime = 0; // 攻击开始时间
+    }
+
+    // 查找有效的生成位置（从与可通行区域相连的边缘）
+    findValidSpawnPosition() {
+        const margin = 50; // 边缘距离
+        const maxAttempts = 100; // 最大尝试次数
+        
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            const side = Math.floor(Math.random() * 4);
+            let x, y;
+            
+            // 在边缘生成候选位置
+            if (side === 0) {
+                // 顶部边缘
+                x = Math.random() * canvas.width;
+                y = -margin;
+            } else if (side === 1) {
+                // 右侧边缘
+                x = canvas.width + margin;
+                y = Math.random() * canvas.height;
+            } else if (side === 2) {
+                // 底部边缘
+                x = Math.random() * canvas.width;
+                y = canvas.height + margin;
+            } else {
+                // 左侧边缘
+                x = -margin;
+                y = Math.random() * canvas.height;
+            }
+            
+            // 检查这个位置是否靠近可通行区域（即不与障碍物重叠，且附近有可通行区域）
+            if (this.isNearPassableArea(x, y)) {
+                return { x, y };
+            }
+        }
+        
+        // 如果找不到有效位置，返回默认位置（左上角）
+        return { x: -margin, y: -margin };
+    }
+    
+    // 检查位置是否靠近可通行区域
+    isNearPassableArea(x, y) {
+        const checkRadius = 60; // 检查半径
+        
+        // 检查周围是否有可通行区域
+        for (let dy = -checkRadius; dy <= checkRadius; dy += 20) {
+            for (let dx = -checkRadius; dx <= checkRadius; dx += 20) {
+                const checkX = x + dx;
+                const checkY = y + dy;
+                
+                // 检查是否在画布内
+                if (checkX < 0 || checkX >= canvas.width || checkY < 0 || checkY >= canvas.height) {
+                    continue;
+                }
+                
+                // 检查是否与障碍物重叠
+                let isBlocked = false;
+                for (const obstacle of obstacles) {
+                    if (checkX >= obstacle.x && checkX < obstacle.x + obstacle.width &&
+                        checkY >= obstacle.y && checkY < obstacle.y + obstacle.height) {
+                        isBlocked = true;
+                        break;
+                    }
+                }
+                
+                // 如果找到可通行区域，返回true
+                if (!isBlocked) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
     }
 
     update() {
@@ -1616,7 +1586,7 @@ class Zombie {
             // 检测攻击范围内的木墙
             for (let j = obstacles.length - 1; j >= 0; j--) {
                 const obstacle = obstacles[j];
-                if (obstacle.type === 'wood') {
+                if (obstacle.type === 'wood' && !obstacle.indestructible) {
                     // 计算从攻击范围圆心到木墙的距离
                     const wallDistance = Math.sqrt(
                         Math.pow(obstacle.x + obstacle.width / 2 - attackCenterX, 2) + 
@@ -2125,10 +2095,17 @@ window.addEventListener('keydown', (e) => {
                 infiniteAmmo = !infiniteAmmo;
                 addLog(infiniteAmmo ? '启用无限子弹模式' : '禁用无限子弹模式');
             }
+            // 数字键8：开关地图调试模式（使用e.code确保只响应普通数字键）
+            else if (e.code === 'Digit8') {
+                showMapDebug = !showMapDebug;
+                addLog(showMapDebug ? '显示地图调试模式' : '隐藏地图调试模式');
+            }
             // 数字键9：开关攻击范围显示（使用e.code确保只响应普通数字键）
             else if (e.code === 'Digit9') {
+                console.log('数字键9被按下，当前状态:', showAttackRange);
                 showAttackRange = !showAttackRange;
                 addLog(showAttackRange ? '显示攻击范围' : '隐藏攻击范围');
+                console.log('切换后状态:', showAttackRange);
             }
             // 加号键：加速游戏
             else if (e.key === '+' || e.key === '=') {
@@ -2172,10 +2149,13 @@ function init() {
     damageTexts = [];
     medkits = [];
     barrels = [];
-    obstacles = [];
+    // 如果没有从地图数据加载障碍物，才清空obstacles数组
+    if (obstacles.length === 0) {
+        obstacles = [];
+    }
     
-    // 生成随机地形
-    generateObstacles();
+    // 生成随机地形（已注释，使用navmesh.png生成的障碍物）
+    // generateObstacles();
     
     // 生成油桶
     for (let i = 0; i < barrelCount; i++) {
@@ -2264,6 +2244,55 @@ function gameLoop() {
     
     // 重新绘制画布，解决拖影问题
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // 绘制地图背景
+    if (mapImage) {
+        try {
+            if (showMapDebug) {
+                // 先绘制地图背景图片
+                ctx.drawImage(mapImage, 0, 0, canvas.width, canvas.height);
+                
+                // 绘制灰色和紫色的可通行/不可通行区域
+                // 灰色表示可通行区域，紫色表示不可通行区域
+                const cellSize = 20;
+                
+                for (let y = 0; y < canvas.height; y += cellSize) {
+                    for (let x = 0; x < canvas.width; x += cellSize) {
+                        // 检查这个位置是否有障碍物
+                        let hasObstacle = false;
+                        for (const obstacle of obstacles) {
+                            if (obstacle.x === x && obstacle.y === y) {
+                                hasObstacle = true;
+                                break;
+                            }
+                        }
+                        
+                        // 根据是否有障碍物绘制不同颜色
+                        if (!hasObstacle) {
+                            // 可通行区域 - 半透明灰色
+                            ctx.fillStyle = 'rgba(136, 136, 136, 0.3)';
+                        } else {
+                            // 不可通行区域 - 半透明紫色
+                            ctx.fillStyle = 'rgba(128, 0, 128, 0.5)';
+                        }
+                        ctx.fillRect(x, y, cellSize, cellSize);
+                    }
+                }
+            } else {
+                // 绘制地图背景图片
+                ctx.drawImage(mapImage, 0, 0, canvas.width, canvas.height);
+            }
+        } catch (error) {
+            console.error('绘制地图时出错:', error);
+            // 出错时绘制默认背景
+            ctx.fillStyle = '#222';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+    } else {
+        // 如果地图图片未加载，绘制默认背景
+        ctx.fillStyle = '#222';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
     
     // 绘制障碍物
     drawObstacles();
@@ -2470,8 +2499,8 @@ function gameLoop() {
             for (let j = obstacles.length - 1; j >= 0; j--) {
                 const obstacle = obstacles[j];
                 if (collisionWithVolume(bullet, obstacle)) {
-                    // 木墙可以被破坏，石墙不可以
-                    if (obstacle.type === 'wood') {
+                    // 木墙可以被破坏，石墙不可以，不可破坏的障碍物不可以
+                    if (obstacle.type === 'wood' && !obstacle.indestructible) {
                         obstacle.health -= bullet.damage || 25;
                         if (obstacle.health <= 0) {
                             obstacles.splice(j, 1);
@@ -2837,18 +2866,217 @@ async function startGame() {
             await loadWeaponsFromCSV();
         }
         
+        // 加载地图数据（从嵌入的常量读取）
+        console.log('加载地图数据...');
+        await loadMapData();
+        
+        // 如果没有通过地图数据生成障碍物，生成默认障碍物（已注释，使用navmesh.png生成的障碍物）
+        // if (obstacles.length === 0) {
+        //     console.log('没有地图数据，生成默认障碍物');
+        //     generateObstacles();
+        // }
+        
+        // 初始化游戏（在地图数据加载之后）
+        init();
+        
         document.getElementById('startScreen').style.display = 'none';
         document.getElementById('gameOver').style.display = 'none';
         gameRunning = true;
         gameStartTime = Date.now(); // 记录游戏开始时间
         zombieSpawnInterval = 2000;
-        init();
         gameLoop();
         addLog('游戏开始');
         console.log('Game started successfully');
         console.log('当前武器配置:', WEAPON_CONFIG);
+        console.log('障碍物数量:', obstacles.length);
     } catch (e) {
         console.error('Error starting game:', e);
+    }
+}
+
+// 加载地图数据（从嵌入的常量读取）
+async function loadMapData() {
+    return new Promise((resolve, reject) => {
+        try {
+            console.log('开始加载地图数据...');
+            
+            if (typeof MAP_DATA === 'undefined') {
+                throw new Error('MAP_DATA not found');
+            }
+            
+            console.log('地图数据加载成功');
+            console.log('地图版本:', MAP_DATA.version);
+            console.log('游戏画布尺寸:', MAP_DATA.gameCanvas.width, 'x', MAP_DATA.gameCanvas.height);
+            console.log('地图图片尺寸:', MAP_DATA.mapImageSize.width, 'x', MAP_DATA.mapImageSize.height);
+            console.log('单元格大小:', MAP_DATA.cellSize);
+            console.log('障碍物数量:', MAP_DATA.obstacles.length);
+            console.log('可通行区域:', MAP_DATA.statistics.passableCells, '个单元格');
+            console.log('不可通行区域:', MAP_DATA.statistics.impassableCells, '个单元格');
+            
+            // 清空现有障碍物
+            obstacles = [];
+            
+            // 从MAP_DATA加载障碍物
+            for (const obstacleData of MAP_DATA.obstacles) {
+                obstacles.push({
+                    x: obstacleData.x,
+                    y: obstacleData.y,
+                    width: obstacleData.width,
+                    height: obstacleData.height,
+                    type: obstacleData.type,
+                    health: obstacleData.health,
+                    indestructible: true // 从map1.png加载的障碍物不可破坏
+                });
+            }
+            
+            console.log('地图数据加载完成，障碍物总数:', obstacles.length);
+            
+            // 加载地图背景图片
+            console.log('开始加载地图背景图片: images/map1.png');
+            mapImage = new Image();
+            mapImage.src = 'images/map1.png';
+            mapImage.onload = () => {
+                console.log('地图背景图片加载成功，尺寸:', mapImage.width, 'x', mapImage.height);
+                resolve();
+            };
+            mapImage.onerror = (e) => {
+                console.error('地图背景图片加载失败:', e);
+                resolve();
+            };
+        } catch (error) {
+            console.error('地图数据加载失败:', error);
+            // 加载失败时清空障碍物
+            obstacles = [];
+            resolve();
+        }
+    });
+}
+
+// 加载地图背景图片（黑白地图，黑色不可通行，白色可通行）
+function loadMapImage() {
+    return new Promise((resolve, reject) => {
+        try {
+            console.log('开始加载地图图片: images/map1.png');
+            mapImage = new Image();
+            mapImage.src = 'images/map1.png';
+            mapImage.onload = () => {
+                try {
+                    console.log('地图背景图片加载成功，尺寸:', mapImage.width, 'x', mapImage.height);
+                    // 分析黑白地图，设置可通行和不可通行区域
+                    analyzeBlackWhiteMap();
+                    resolve();
+                } catch (error) {
+                    console.error('地图分析失败:', error);
+                    // 即使分析失败也继续游戏
+                    resolve();
+                }
+            };
+            mapImage.onerror = (e) => {
+                console.error('地图背景图片加载失败:', e);
+                // 即使加载失败也继续游戏
+                resolve();
+            };
+        } catch (error) {
+            console.error('地图加载初始化失败:', error);
+            resolve();
+        }
+    });
+}
+
+// 分析黑白地图，自动设置可通行和不可通行区域
+// 黑色区域表示不可通行，白色区域表示可通行
+function analyzeBlackWhiteMap() {
+    try {
+        if (!mapImage) {
+            console.log('没有地图图片，跳过分析');
+            return;
+        }
+        
+        console.log('开始分析黑白地图...');
+        console.log('地图尺寸:', mapImage.width, 'x', mapImage.height);
+        console.log('画布尺寸:', canvas.width, 'x', canvas.height);
+        
+        // 创建临时画布用于分析
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = mapImage.width;
+        tempCanvas.height = mapImage.height;
+        const tempCtx = tempCanvas.getContext('2d');
+        
+        // 绘制地图图片到临时画布
+        tempCtx.drawImage(mapImage, 0, 0);
+        
+        // 获取像素数据
+        const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+        const data = imageData.data;
+        
+        console.log('像素数据长度:', data.length);
+        
+        // 清空现有障碍物
+        obstacles = [];
+        
+        // 分析像素，创建障碍物
+        const cellSize = 20; // 障碍物单元格大小
+        const scaleX = tempCanvas.width / canvas.width;
+        const scaleY = tempCanvas.height / canvas.height;
+        
+        console.log('缩放比例:', scaleX, scaleY);
+        
+        let passableCount = 0;
+        let impassableCount = 0;
+        
+        for (let y = 0; y < canvas.height; y += cellSize) {
+            for (let x = 0; x < canvas.width; x += cellSize) {
+                // 检查这个区域的颜色
+                let isBlack = false;
+                
+                // 直接检查单元格中心的像素颜色，这样更准确反映navmesh的实际情况
+                const centerX = x + cellSize / 2;
+                const centerY = y + cellSize / 2;
+                const mapX = Math.floor(centerX * scaleX);
+                const mapY = Math.floor(centerY * scaleY);
+                
+                if (mapX < tempCanvas.width && mapY < tempCanvas.height) {
+                    const index = (mapY * tempCanvas.width + mapX) * 4;
+                    if (index + 2 < data.length) {
+                        const r = data[index];
+                        const g = data[index + 1];
+                        const b = data[index + 2];
+                        
+                        // 计算亮度，小于80认为是黑色（不可通行），与convert-map.py保持一致
+                        const brightness = (r * 0.299 + g * 0.587 + b * 0.114);
+                        isBlack = brightness < 80;
+                        
+                        // 只在调试时输出，避免控制台输出过多
+                        if (Math.random() < 0.01) { // 只输出1%的日志
+                            console.log(`单元格 (${x},${y}) 中心像素亮度: ${brightness}, 黑色: ${isBlack}`);
+                        }
+                    }
+                }
+                
+                if (isBlack) {
+                    obstacles.push({
+                        x: x,
+                        y: y,
+                        width: cellSize,
+                        height: cellSize,
+                        type: 'wood',
+                        health: 100,
+                        indestructible: true
+                    });
+                    impassableCount++;
+                } else {
+                    passableCount++;
+                }
+            }
+        }
+        
+        console.log('地图分析完成，生成了', obstacles.length, '个障碍物');
+        console.log('可通行区域:', passableCount, '个单元格');
+        console.log('不可通行区域:', impassableCount, '个单元格');
+    } catch (error) {
+        console.error('地图分析出错:', error);
+        // 出错时清空障碍物，确保游戏能继续
+        obstacles = [];
     }
 }
 
@@ -2919,6 +3147,7 @@ const WALL_CONFIG = {
     stoneWallHealth: -1, // 石墙生命值（-1表示不可破坏）
     minUnits: 1, // 最小单元数
     maxUnits: 3, // 最大单元数
+    safeDistance: 100, // 玩家安全区域距离
     safeDistance: 100, // 玩家初始位置的安全距离
     isolationProbability: 0, // 孤立墙体的概率（0%，完全杜绝）
     maxConnections: 2 // 最大连接面数
@@ -3019,6 +3248,12 @@ function doLinesIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
 
 // 生成随机地形
 function generateObstacles() {
+    // 如果已经通过地图分析生成了障碍物，就不再生成默认障碍物
+    if (obstacles.length > 0) {
+        console.log('已通过地图分析生成障碍物，跳过默认障碍物生成');
+        return;
+    }
+    
     obstacles = [];
     
     // 计算网格大小
@@ -3364,6 +3599,11 @@ function generateDamagePattern(width, height) {
 
 // 绘制障碍物
 function drawObstacles() {
+    // 隐藏所有地形效果，不绘制任何障碍物
+    return;
+    
+    // 以下是原始的障碍物绘制代码，已注释掉
+    /*
     obstacles.forEach(obstacle => {
         if (obstacle.type === 'wood') {
             // 木墙根据血量显示不同的破碎效果
@@ -3451,6 +3691,7 @@ function drawObstacles() {
             ctx.strokeRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
         }
     });
+    */
 }
 
 // 检测碰撞

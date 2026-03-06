@@ -1,7 +1,7 @@
-﻿id,name,damage,fireRate,bulletSpeed,magazineSize,currentAmmo,reloadTime,knockback,range
-武器ID,武器名称,伤害值,射击间隔(毫秒),子弹速度,弹匣容量(-1无限),当前弹药,换弹时间(毫秒),击退距离,射程
-pistol,普通手枪,25,200,8,-1,-1,1000,5,300
-magnum,马格南,50,400,10,6,6,1500,10,350
-uzi,UZI冲锋枪,15,50,7,50,50,1200,3,250
-rifle,突击步枪,30,150,9,20,20,1300,7,400
-shotgun,霰弹枪,20,300,6,10,8,1400,8,150
+﻿id,name,damage,fireRate,bulletSpeed,magazineSize,currentAmmo,reloadTime,knockback,range,shotgunPellets
+武器ID,武器名称,伤害值,射击间隔(毫秒),子弹速度(像素/帧),弹匣容量(-1无限),当前弹药,换弹时间(毫秒),击退距离(像素),射程(像素),单发的子弹数（霰弹枪用）
+pistol,普通手枪,25,200,8,-1,-1,1000,5,300,1
+magnum,马格南,50,400,10,6,6,1500,10,350,1
+uzi,UZI冲锋枪,15,50,7,50,50,1200,3,250,1
+rifle,突击步枪,30,150,9,20,20,1300,7,400,1
+shotgun,霰弹枪,20,300,6,8,8,1400,8,150,8
