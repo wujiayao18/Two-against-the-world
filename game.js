@@ -26,9 +26,18 @@ let lastZombieSpawn = 0; // 上次生成僵尸的时间戳
 let zombieSpawnInterval = 2000; // 僵尸生成间隔（毫秒）
 let maxZombies = 200; // 保持不动，最大僵尸数量限制，减少僵尸数量提高性能
 let frameCount = 0; // 帧计数器，用于优化绘制
+let lastFrameTime = 0; // 上次帧时间
+const targetFPS = 60; // 目标帧率
+const frameInterval = 1000 / targetFPS; // 每帧间隔时间（毫秒）
 let audioContext = null; // 音频上下文，用于播放音效
 let mapImage = null; // 地图背景图片
 let lights = []; // 动态光照效果数组
+
+// 对象池
+const objectPools = {
+    bullets: [], // 子弹对象池
+    damageTexts: [] // 伤害文本对象池
+};
 
 // 武器配置
 let WEAPON_CONFIG = {};
@@ -146,6 +155,25 @@ function addLog(message) {
     // 限制日志数量，最多显示50条
     if (logElement.children.length > 50) {
         logElement.removeChild(logElement.firstChild);
+    }
+}
+
+// 对象池管理函数
+function getObjectFromPool(poolName) {
+    const pool = objectPools[poolName];
+    if (pool && pool.length > 0) {
+        return pool.pop();
+    }
+    return null;
+}
+
+function returnObjectToPool(poolName, object) {
+    const pool = objectPools[poolName];
+    if (pool) {
+        // 限制对象池大小，避免内存占用过高
+        if (pool.length < 100) {
+            pool.push(object);
+        }
     }
 }
 
@@ -379,8 +407,9 @@ class Player {
         // 死亡玩家不能操作
         if (this.isDead) return;
         
-        // 自动回血逻辑
-        const now = Date.now();
+        try {
+            // 自动回血逻辑
+            const now = Date.now();
         if (now - this.lastHealthRegenTime >= this.healthRegenInterval / gameSpeed) {
             if (this.health < 100) {
                 this.health = Math.min(100, this.health + this.healthRegenRate);
@@ -1189,6 +1218,12 @@ class Player {
             if (!this.isPlayer1 && keys['enter']) {
                 this.shoot();
             }
+        }
+        
+        } catch (error) {
+            console.error('玩家更新错误:', error);
+            // 显示错误信息到游戏界面
+            addLog(`玩家${this.isPlayer1 ? '1' : '2'}更新错误: ${error.message}`);
         }
     }
 
@@ -2040,8 +2075,9 @@ class Zombie {
         // 检查是否启用了怪物静止模式
         if (freezeZombies) return;
         
-        // BOSS吃小丧尸逻辑
-        if (this.isBoss) {
+        try {
+            // BOSS吃小丧尸逻辑
+            if (this.isBoss) {
             for (let i = zombies.length - 1; i >= 0; i--) {
                 const otherZombie = zombies[i];
                 if (otherZombie !== this && !otherZombie.isBoss) {
@@ -2641,6 +2677,12 @@ class Zombie {
             this.y = testY;
         }
         // 如果两个方向都不能移动，僵尸保持原地
+        
+        } catch (error) {
+            console.error('僵尸更新错误:', error);
+            // 显示错误信息到游戏界面
+            addLog(`僵尸更新错误: ${error.message}`);
+        }
     }
 
     draw() {
@@ -3250,10 +3292,19 @@ function drawLights() {
 }
 
 // 游戏循环
-function gameLoop() {
+function gameLoop(timestamp) {
     if (!gameRunning) return;
     
-    frameCount++;
+    // 帧率控制
+    if (!lastFrameTime) lastFrameTime = timestamp;
+    const elapsed = timestamp - lastFrameTime;
+    
+    // 只有当经过的时间大于或等于帧间隔时，才执行游戏逻辑
+    if (elapsed >= frameInterval) {
+        frameCount++;
+        lastFrameTime = timestamp - (elapsed % frameInterval); // 调整lastFrameTime，保持帧率稳定
+        
+        try {
     
     // 更新游戏时间显示
     if (gameStartTime > 0) {
@@ -3619,9 +3670,11 @@ function gameLoop() {
                     Math.pow(bullet.y - bullet.startY, 2)
                 );
                 if (distance > bullet.range) {
-                    bullets.splice(i, 1);
-                    continue;
-                }
+                            // 将子弹返回对象池
+                            returnObjectToPool('bullets', bullet);
+                            bullets.splice(i, 1);
+                            continue;
+                        }
             }
             
             ctx.fillStyle = bullet.player.color;
@@ -3824,6 +3877,8 @@ function gameLoop() {
             
             // 子弹出界或击中目标
             if (bulletHit || bullet.x < 0 || bullet.x > canvas.width || bullet.y < 0 || bullet.y > canvas.height) {
+                // 将子弹返回对象池
+                returnObjectToPool('bullets', bullet);
                 bullets.splice(i, 1);
             }
         }
@@ -3896,11 +3951,13 @@ function gameLoop() {
         // 更新和绘制伤害飘字
         for (let i = damageTexts.length - 1; i >= 0; i--) {
             const text = damageTexts[i];
-            text.y += text.yVelocity;
-            text.opacity -= 0.01;
-            text.life -= 16; // 假设60fps
+            text.y += text.yVelocity * (elapsed / 16.666); // 基于60fps的时间缩放
+            text.opacity -= 0.01 * (elapsed / 16.666); // 基于60fps的时间缩放
+            text.life -= elapsed; // 根据实际经过的时间减少生命值
             
             if (text.life <= 0) {
+                // 将伤害文本返回对象池
+                returnObjectToPool('damageTexts', text);
                 damageTexts.splice(i, 1);
                 continue;
             }
@@ -4073,6 +4130,14 @@ function gameLoop() {
     // 恢复画布状态
     ctx.restore();
     
+    } catch (error) {
+        console.error('游戏循环错误:', error);
+        // 显示错误信息到游戏界面
+        addLog(`游戏错误: ${error.message}`);
+    }
+    }
+    
+    // 继续游戏循环
     requestAnimationFrame(gameLoop);
 }
 
@@ -4557,16 +4622,33 @@ function playGunshot() {
 
 // 创建伤害飘字
 function createDamageText(x, y, damage, color = '#ff0000', size = 16) {
-    damageTexts.push({
-        x: x,
-        y: y,
-        damage: damage,
-        color: color,
-        size: size,
-        opacity: 1,
-        yVelocity: -1,
-        life: 1500
-    });
+    // 从对象池获取伤害文本
+    let damageText = getObjectFromPool('damageTexts');
+    if (!damageText) {
+        // 如果对象池为空，创建新伤害文本
+        damageText = {
+            x: 0,
+            y: 0,
+            damage: 0,
+            color: '',
+            size: 0,
+            opacity: 0,
+            yVelocity: 0,
+            life: 0
+        };
+    }
+    
+    // 初始化伤害文本属性
+    damageText.x = x;
+    damageText.y = y;
+    damageText.damage = damage;
+    damageText.color = color;
+    damageText.size = size;
+    damageText.opacity = 1;
+    damageText.yVelocity = -1;
+    damageText.life = 1500;
+    
+    damageTexts.push(damageText);
 }
 
 // 墙体配置参数
