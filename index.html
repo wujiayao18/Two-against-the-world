@@ -15,8 +15,17 @@
 <body>
     <!-- 游戏容器，包含所有游戏元素 -->
     <div class="game-container">
-        <!-- 游戏画布，用于绘制游戏场景 -->
-        <canvas id="gameCanvas" width="900" height="675"></canvas>
+        <!-- 游戏画布容器 -->
+        <div class="canvas-container">
+            <!-- 游戏画布，用于绘制游戏场景 -->
+            <canvas id="gameCanvas" width="900" height="675"></canvas>
+            
+            <!-- 游戏时间信息 -->
+            <div class="game-time">
+                <h3>游戏时间</h3>
+                <p><span id="gameTime">00:00</span></p>
+            </div>
+        </div>
         
         <!-- 游戏信息面板，显示玩家状态 -->
         <div class="game-info">
@@ -56,7 +65,10 @@
             <!-- 作弊码说明 -->
             <div class="cheats">
                 <h4>作弊码</h4>
-                <p>0: 玩家2 AI托管 | 1: 无敌 | 2: 怪物静止 | 3: 清屏 | 4: 自动射击 | 5: 无限子弹</p>
+                <p>0: 玩家2 AI托管</p>
+                <p>1: 无敌 | 2: 怪物静止</p>
+                <p>3: 清屏 | 4: 自动射击</p>
+                <p>5: 无限子弹 | 9: 开关攻击范围</p>
                 <p>+: 加速游戏 | -: 减速游戏</p>
             </div>
         </div>
@@ -85,11 +97,9 @@
             <p>玩家2：使用方向键移动，回车键射击，小键盘1/2切换武器</p>
             <p>靠近死亡队友可以复活，每秒自动恢复1点生命值</p>
             <p>消灭僵尸获得分数，坚持时间越长，僵尸越强</p>
-            <h3>作弊码</h3>
-            <p>0: 玩家2 AI托管 | 1: 无敌 | 2: 怪物静止 | 3: 清屏 | 4: 自动射击 | 5: 无限子弹</p>
-            <p>+: 加速游戏 | -: 减速游戏</p>
         </div>
-        <button onclick="startGame()">开始游戏</button>
+        <button id="startButton" onclick="startGame()">开始游戏</button>
+        <p class="start-hint">按空格键或回车键开始游戏</p>
     </div>
     
     <!-- 引入游戏逻辑脚本 -->

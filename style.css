@@ -32,6 +32,13 @@ body {
     display: inline-block; /* 使用inline-block显示，使容器宽度适应内容 */
 }
 
+/* 画布容器样式 */
+/* 包含画布和游戏时间框的容器 */
+.canvas-container {
+    position: relative; /* 相对定位，使子元素可以使用绝对定位 */
+    display: inline-block; /* 使容器宽度适应内容 */
+}
+
 /* 游戏画布样式 */
 /* 游戏的主要交互区域，用于绘制游戏场景 */
 canvas {
@@ -150,6 +157,43 @@ canvas:hover {
     font-size: 12px; /* 设置字体大小 */
     color: #ccc; /* 设置文本颜色为浅灰色，与深色背景形成对比 */
     text-align: center; /* 文本居中 */
+}
+
+/* 游戏时间样式 */
+/* 显示当前游戏时间的样式，位于画布左下角 */
+.game-time {
+    padding: 4px 8px; /* 添加内边距，使内容更加美观 */
+    border-radius: 6px; /* 设置圆角边框 */
+    transition: all 0.3s ease; /* 添加过渡效果 */
+    background-color: rgba(255, 193, 7, 0.1); /* 设置黄色调的半透明背景 */
+    border: 1px solid rgba(255, 193, 7, 0.7); /* 添加半透明的黄色边框 */
+    min-width: 80px; /* 设置最小宽度，确保信息显示完整 */
+    font-size: 11px; /* 设置字体大小 */
+    position: absolute; /* 使用绝对定位 */
+    left: 10px; /* 距离画布左侧10px */
+    bottom: 10px; /* 距离画布底部10px */
+    max-width: 100px; /* 设置最大宽度，避免信息面板过宽 */
+    z-index: 10; /* 确保显示在画布上方 */
+}
+
+/* 游戏时间标题样式 */
+/* 游戏时间标题的样式 */
+.game-time h3 {
+    color: #ffc107; /* 设置黄色文本，与游戏时间的主题色一致 */
+    margin-bottom: 4px; /* 设置底部边距 */
+    font-size: 14px; /* 设置字体大小 */
+    font-weight: 600; /* 设置字体粗细 */
+    text-align: center; /* 文本居中 */
+}
+
+/* 游戏时间文本样式 */
+/* 游戏时间数字的样式 */
+.game-time p {
+    margin: 3px 0; /* 设置上下边距 */
+    font-size: 12px; /* 设置字体大小 */
+    color: #ccc; /* 设置文本颜色为浅灰色，与深色背景形成对比 */
+    text-align: center; /* 文本居中 */
+    font-family: 'Courier New', monospace; /* 使用等宽字体，使时间显示更整齐 */
 }
 
 /* 玩家1标题样式 */
@@ -392,6 +436,26 @@ button:active {
 /* 开始界面默认显示，游戏开始后隐藏 */
 .start-screen {
     display: block;
+}
+
+/* 开始界面提示样式 */
+/* 开始界面中的按键提示样式 */
+.start-hint {
+    margin-top: 20px;
+    font-size: 14px;
+    color: #ffc107;
+    font-weight: 600;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+/* 提示文字脉冲动画 */
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
 }
 
 /* 响应式设计 */
