@@ -196,6 +196,40 @@ canvas:hover {
     font-family: 'Courier New', monospace; /* 使用等宽字体，使时间显示更整齐 */
 }
 
+/* 帧率显示样式 */
+.fps-display {
+    padding: 4px 8px; /* 添加内边距，使内容更加美观 */
+    border-radius: 6px; /* 设置圆角边框 */
+    transition: all 0.3s ease; /* 添加过渡效果 */
+    background-color: rgba(76, 175, 80, 0.1); /* 设置绿色调的半透明背景 */
+    border: 1px solid rgba(76, 175, 80, 0.7); /* 添加半透明的绿色边框 */
+    min-width: 60px; /* 设置最小宽度，确保信息显示完整 */
+    font-size: 11px; /* 设置字体大小 */
+    position: absolute; /* 使用绝对定位 */
+    right: 10px; /* 距离画布右侧10px */
+    bottom: 10px; /* 距离画布底部10px */
+    max-width: 80px; /* 设置最大宽度，避免信息面板过宽 */
+    z-index: 10; /* 确保显示在画布上方 */
+}
+
+/* 帧率显示标题样式 */
+.fps-display h3 {
+    color: #4caf50; /* 设置绿色文本 */
+    margin-bottom: 4px; /* 设置底部边距 */
+    font-size: 14px; /* 设置字体大小 */
+    font-weight: 600; /* 设置字体粗细 */
+    text-align: center; /* 文本居中 */
+}
+
+/* 帧率显示文本样式 */
+.fps-display p {
+    margin: 3px 0; /* 设置上下边距 */
+    font-size: 12px; /* 设置字体大小 */
+    color: #ccc; /* 设置文本颜色为浅灰色，与深色背景形成对比 */
+    text-align: center; /* 文本居中 */
+    font-family: 'Courier New', monospace; /* 使用等宽字体，使帧率显示更整齐 */
+}
+
 /* 玩家1标题样式 */
 /* 玩家1名称的样式 */
 .player1 h3 {

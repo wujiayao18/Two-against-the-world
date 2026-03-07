@@ -1,7 +1,7 @@
 // 游戏变量
 let canvas, ctx; // 画布和上下文
 let gameRunning = false; // 游戏运行状态
-let gamePaused = false; // 游戏暂停状态
+let gamePaused = false; // 暂停状态
 let gameStartTime = 0; // 游戏开始时间
 let pauseStartTime = 0; // 暂停开始时间
 let totalPauseTime = 0; // 总暂停时间
@@ -29,14 +29,50 @@ let frameCount = 0; // 帧计数器，用于优化绘制
 let lastFrameTime = 0; // 上次帧时间
 const targetFPS = 60; // 目标帧率
 const frameInterval = 1000 / targetFPS; // 每帧间隔时间（毫秒）
+let fps = 0; // 当前帧率
+let fpsUpdateTime = 0; // 上次更新帧率的时间
+let fpsFrameCount = 0; // 帧率计算的帧计数器
 let audioContext = null; // 音频上下文，用于播放音效
 let mapImage = null; // 地图背景图片
 let lights = []; // 动态光照效果数组
 
+// 性能分析
+const performanceStats = {
+    frameTime: 0, // 帧处理时间
+    updateTime: 0, // 更新时间
+    drawTime: 0, // 绘制时间
+    zombieCount: 0, // 僵尸数量
+    bulletCount: 0, // 子弹数量
+    particleCount: 0, // 粒子数量
+    enabled: false // 是否启用性能分析
+};
+
+// 资源管理
+const resources = {
+    images: {},
+    audio: {},
+    loaded: 0,
+    total: 0,
+    loading: false
+};
+
+// 预加载资源列表
+const preloadResources = {
+    images: [
+        { id: 'map', src: 'images/map1.png' },
+        // 可以添加其他图片资源
+    ],
+    audio: [
+        // 可以添加音频资源
+    ]
+};
+
 // 对象池
 const objectPools = {
     bullets: [], // 子弹对象池
-    damageTexts: [] // 伤害文本对象池
+    damageTexts: [], // 伤害文本对象池
+    particles: [], // 粒子特效对象池
+    barrels: [] // 油桶对象池
 };
 
 // 武器配置
@@ -158,7 +194,16 @@ function addLog(message) {
     }
 }
 
-// 对象池管理函数
+/**
+ * 对象池管理函数
+ * 用于管理游戏对象的创建和回收，减少内存分配和垃圾回收的开销
+ */
+
+/**
+ * 从对象池中获取一个对象
+ * @param {string} poolName - 对象池名称（如 'bullets', 'particles', 'damageTexts'）
+ * @returns {Object|null} 返回池中的对象，如果池为空则返回 null
+ */
 function getObjectFromPool(poolName) {
     const pool = objectPools[poolName];
     if (pool && pool.length > 0) {
@@ -167,6 +212,12 @@ function getObjectFromPool(poolName) {
     return null;
 }
 
+/**
+ * 将对象归还到对象池
+ * @param {string} poolName - 对象池名称
+ * @param {Object} object - 要归还的对象
+ * @description 对象池大小限制为100，避免内存占用过高
+ */
 function returnObjectToPool(poolName, object) {
     const pool = objectPools[poolName];
     if (pool) {
@@ -177,8 +228,259 @@ function returnObjectToPool(poolName, object) {
     }
 }
 
-// 游戏对象类
+/**
+ * 资源预加载函数
+ * 用于在游戏启动时预加载所有必要的资源，避免游戏过程中的加载延迟
+ */
+
+/**
+ * 加载单个图片资源
+ * @param {string} id - 资源标识符，用于后续引用
+ * @param {string} src - 图片资源的URL路径
+ * @returns {Promise<HTMLImageElement|null>} 返回Promise，成功时返回图片对象，失败时返回null
+ */
+function loadImage(id, src) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            resources.images[id] = img;
+            resources.loaded++;
+            console.log(`图片资源加载成功: ${src}`);
+            resolve(img);
+        };
+        img.onerror = (error) => {
+            console.error(`图片资源加载失败: ${src}`, error);
+            resources.loaded++;
+            resolve(null);
+        };
+        img.src = src;
+    });
+}
+
+/**
+ * 加载单个音频资源
+ * @param {string} id - 资源标识符，用于后续引用
+ * @param {string} src - 音频资源的URL路径
+ * @returns {Promise<HTMLAudioElement|null>} 返回Promise，成功时返回音频对象，失败时返回null
+ */
+function loadAudio(id, src) {
+    return new Promise((resolve, reject) => {
+        const audio = new Audio(src);
+        audio.oncanplaythrough = () => {
+            resources.audio[id] = audio;
+            resources.loaded++;
+            console.log(`音频资源加载成功: ${src}`);
+            resolve(audio);
+        };
+        audio.onerror = (error) => {
+            console.error(`音频资源加载失败: ${src}`, error);
+            resources.loaded++;
+            resolve(null);
+        };
+        audio.src = src;
+    });
+}
+
+/**
+ * 预加载所有资源
+ * 加载 preloadResources 中定义的所有图片和音频资源
+ * @returns {Promise<boolean>} 返回Promise，所有资源加载成功返回true，否则返回false
+ * @description 加载完成后会自动更新 mapImage 引用
+ */
+async function preloadAllResources() {
+    console.log('开始预加载资源...');
+    resources.loading = true;
+    resources.loaded = 0;
+    
+    // 计算总资源数
+    resources.total = preloadResources.images.length + preloadResources.audio.length;
+    console.log(`需要加载的资源总数: ${resources.total}`);
+    
+    // 加载图片资源
+    const imagePromises = preloadResources.images.map(img => loadImage(img.id, img.src));
+    // 加载音频资源
+    const audioPromises = preloadResources.audio.map(audio => loadAudio(audio.id, audio.src));
+    
+    // 等待所有资源加载完成
+    await Promise.all([...imagePromises, ...audioPromises]);
+    
+    console.log(`资源加载完成，成功加载: ${resources.loaded}/${resources.total}`);
+    resources.loading = false;
+    
+    // 更新地图图片引用
+    if (resources.images['map']) {
+        mapImage = resources.images['map'];
+        console.log('地图图片已从预加载资源中设置');
+    }
+    
+    return resources.loaded === resources.total;
+}
+
+/**
+ * 资源回收函数
+ * 用于及时释放不再使用的资源，避免内存占用过高
+ */
+
+/**
+ * 释放单个资源
+ * @param {string} type - 资源类型（'images' 或 'audio'）
+ * @param {string} id - 资源标识符
+ * @returns {boolean} 成功释放返回true，资源不存在返回false
+ */
+function releaseResource(type, id) {
+    if (resources[type] && resources[type][id]) {
+        console.log(`释放资源: ${type}/${id}`);
+        // 释放图片资源
+        if (type === 'images') {
+            // 清除图片引用
+            delete resources.images[id];
+        }
+        // 释放音频资源
+        else if (type === 'audio') {
+            // 停止音频播放
+            if (resources.audio[id].playing) {
+                resources.audio[id].pause();
+            }
+            // 清除音频引用
+            delete resources.audio[id];
+        }
+        return true;
+    }
+    return false;
+}
+
+/**
+ * 释放所有资源
+ * 遍历并释放所有已加载的图片和音频资源
+ */
+function releaseAllResources() {
+    console.log('释放所有资源...');
+    
+    // 释放图片资源
+    for (const id in resources.images) {
+        releaseResource('images', id);
+    }
+    
+    // 释放音频资源
+    for (const id in resources.audio) {
+        releaseResource('audio', id);
+    }
+    
+    console.log('所有资源已释放');
+}
+
+/**
+ * 内存监控函数
+ * 检测当前内存使用情况，并在控制台输出
+ * @description 仅在支持 performance.memory 的浏览器中有效
+ */
+function monitorMemory() {
+    if (performance && performance.memory) {
+        const memory = performance.memory;
+        console.log('内存使用情况:', {
+            used: (memory.usedJSHeapSize / 1024 / 1024).toFixed(2) + ' MB',
+            total: (memory.totalJSHeapSize / 1024 / 1024).toFixed(2) + ' MB',
+            limit: (memory.jsHeapSizeLimit / 1024 / 1024).toFixed(2) + ' MB'
+        });
+        
+        // 检查内存使用是否过高
+        const usedMB = memory.usedJSHeapSize / 1024 / 1024;
+        if (usedMB > 500) {
+            console.warn('内存使用过高，考虑释放资源');
+            // 可以在这里添加自动资源回收逻辑
+        }
+    }
+}
+
+// 定期内存监控
+setInterval(monitorMemory, 60000); // 每分钟检查一次内存使用情况
+
+/**
+ * 性能分析工具
+ * 用于识别游戏中的性能瓶颈
+ */
+
+/**
+ * 开始性能分析
+ * 记录帧开始时间
+ */
+function startPerformanceAnalysis() {
+    if (performanceStats.enabled) {
+        performanceStats.frameStartTime = performance.now();
+    }
+}
+
+/**
+ * 记录更新阶段时间
+ */
+function recordUpdateTime() {
+    if (performanceStats.enabled) {
+        performanceStats.updateTime = performance.now() - performanceStats.frameStartTime;
+    }
+}
+
+/**
+ * 记录绘制阶段时间
+ */
+function recordDrawTime() {
+    if (performanceStats.enabled) {
+        performanceStats.drawTime = performance.now() - performanceStats.frameStartTime - performanceStats.updateTime;
+    }
+}
+
+/**
+ * 结束性能分析
+ * 记录帧结束时间并输出性能数据
+ */
+function endPerformanceAnalysis() {
+    if (performanceStats.enabled) {
+        performanceStats.frameTime = performance.now() - performanceStats.frameStartTime;
+        performanceStats.zombieCount = zombies.length;
+        performanceStats.bulletCount = bullets.length;
+        performanceStats.particleCount = particles.length;
+    }
+}
+
+/**
+ * 输出性能分析报告
+ */
+function printPerformanceReport() {
+    if (performanceStats.enabled) {
+        console.log('=== 性能分析报告 ===');
+        console.log(`帧时间: ${performanceStats.frameTime.toFixed(2)}ms`);
+        console.log(`更新时间: ${performanceStats.updateTime.toFixed(2)}ms`);
+        console.log(`绘制时间: ${performanceStats.drawTime.toFixed(2)}ms`);
+        console.log(`僵尸数量: ${performanceStats.zombieCount}`);
+        console.log(`子弹数量: ${performanceStats.bulletCount}`);
+        console.log(`粒子数量: ${performanceStats.particleCount}`);
+        console.log(`FPS: ${fps}`);
+        console.log('==================');
+    }
+}
+
+/**
+ * 切换性能分析开关
+ */
+function togglePerformanceAnalysis() {
+    performanceStats.enabled = !performanceStats.enabled;
+    addLog(`性能分析: ${performanceStats.enabled ? '开启' : '关闭'}`);
+    console.log(`性能分析已${performanceStats.enabled ? '开启' : '关闭'}`);
+}
+
+/**
+ * 玩家类
+ * 代表游戏中的玩家角色，包含移动、射击、AI行为等功能
+ * @class
+ */
 class Player {
+    /**
+     * 创建一个玩家实例
+     * @param {number} x - 初始X坐标
+     * @param {number} y - 初始Y坐标
+     * @param {string} color - 玩家颜色
+     * @param {Object} controls - 控制键配置
+     * @param {boolean} isPlayer1 - 是否为玩家1
+     */
     constructor(x, y, color, controls, isPlayer1) {
         this.x = x; // 玩家X坐标
         this.y = y; // 玩家Y坐标
@@ -1649,7 +1951,16 @@ class Player {
     }
 }
 
+/**
+ * 僵尸类
+ * 代表游戏中的敌人角色，包含移动、攻击、路径寻找等AI行为
+ * @class
+ */
 class Zombie {
+    /**
+     * 创建一个僵尸实例
+     * @param {boolean} [isBoss=false] - 是否为BOSS僵尸
+     */
     constructor(isBoss = false) {
         // 从与可通行区域相连的边缘生成
         const spawnPos = this.findValidSpawnPosition();
@@ -2966,6 +3277,10 @@ window.addEventListener('keydown', (e) => {
                 infiniteAmmo = !infiniteAmmo;
                 addLog(infiniteAmmo ? '启用无限子弹模式' : '禁用无限子弹模式');
             }
+            // 数字键6：开关性能分析（使用e.code确保只响应普通数字键）
+            else if (e.code === 'Digit6') {
+                togglePerformanceAnalysis();
+            }
             // 数字键7：开关友伤机制（使用e.code确保只响应普通数字键）
             else if (e.code === 'Digit7') {
                 friendlyFire = !friendlyFire;
@@ -3121,71 +3436,73 @@ function createParticles(x, y, type = 'explosion', count = 20) {
     for (let i = 0; i < count; i++) {
         let particle;
         
+        // 从对象池获取粒子
+        particle = getObjectFromPool('particles');
+        
+        if (!particle) {
+            // 如果对象池为空，创建新粒子
+            particle = {
+                x: 0,
+                y: 0,
+                vx: 0,
+                vy: 0,
+                life: 0,
+                maxLife: 0,
+                size: 0,
+                color: '',
+                type: ''
+            };
+        }
+        
+        // 初始化粒子属性
+        particle.x = x;
+        particle.y = y;
+        
         switch (type) {
             case 'explosion':
-                particle = {
-                    x: x,
-                    y: y,
-                    vx: (Math.random() - 0.5) * 10,
-                    vy: (Math.random() - 0.5) * 10,
-                    life: 1.0,
-                    maxLife: 1.0,
-                    size: Math.random() * 4 + 2,
-                    color: `hsl(${Math.random() * 60 + 20}, 100%, ${Math.random() * 50 + 50}%)`,
-                    type: 'explosion'
-                };
+                particle.vx = (Math.random() - 0.5) * 10;
+                particle.vy = (Math.random() - 0.5) * 10;
+                particle.life = 1.0;
+                particle.maxLife = 1.0;
+                particle.size = Math.random() * 4 + 2;
+                particle.color = `hsl(${Math.random() * 60 + 20}, 100%, ${Math.random() * 50 + 50}%)`;
+                particle.type = 'explosion';
                 break;
             case 'hit':
-                particle = {
-                    x: x,
-                    y: y,
-                    vx: (Math.random() - 0.5) * 5,
-                    vy: (Math.random() - 0.5) * 5,
-                    life: 0.8,
-                    maxLife: 0.8,
-                    size: Math.random() * 2 + 1,
-                    color: `hsl(${Math.random() * 30}, 100%, ${Math.random() * 30 + 70}%)`,
-                    type: 'hit'
-                };
+                particle.vx = (Math.random() - 0.5) * 5;
+                particle.vy = (Math.random() - 0.5) * 5;
+                particle.life = 0.8;
+                particle.maxLife = 0.8;
+                particle.size = Math.random() * 2 + 1;
+                particle.color = `hsl(${Math.random() * 30}, 100%, ${Math.random() * 30 + 70}%)`;
+                particle.type = 'hit';
                 break;
             case 'blood':
-                particle = {
-                    x: x,
-                    y: y,
-                    vx: (Math.random() - 0.5) * 3,
-                    vy: (Math.random() - 0.5) * 3 - 2,
-                    life: 1.2,
-                    maxLife: 1.2,
-                    size: Math.random() * 3 + 1,
-                    color: `hsl(${Math.random() * 20}, 100%, 30%)`,
-                    type: 'blood'
-                };
+                particle.vx = (Math.random() - 0.5) * 3;
+                particle.vy = (Math.random() - 0.5) * 3 - 2;
+                particle.life = 1.2;
+                particle.maxLife = 1.2;
+                particle.size = Math.random() * 3 + 1;
+                particle.color = `hsl(${Math.random() * 20}, 100%, 30%)`;
+                particle.type = 'blood';
                 break;
             case 'smoke':
-                particle = {
-                    x: x,
-                    y: y,
-                    vx: (Math.random() - 0.5) * 2,
-                    vy: -Math.random() * 3 - 1,
-                    life: 2.0,
-                    maxLife: 2.0,
-                    size: Math.random() * 3 + 2,
-                    color: `hsl(0, 0%, ${Math.random() * 30 + 50}%)`,
-                    type: 'smoke'
-                };
+                particle.vx = (Math.random() - 0.5) * 2;
+                particle.vy = -Math.random() * 3 - 1;
+                particle.life = 2.0;
+                particle.maxLife = 2.0;
+                particle.size = Math.random() * 3 + 2;
+                particle.color = `hsl(0, 0%, ${Math.random() * 30 + 50}%)`;
+                particle.type = 'smoke';
                 break;
             default:
-                particle = {
-                    x: x,
-                    y: y,
-                    vx: (Math.random() - 0.5) * 5,
-                    vy: (Math.random() - 0.5) * 5,
-                    life: 1.0,
-                    maxLife: 1.0,
-                    size: Math.random() * 3 + 1,
-                    color: `hsl(${Math.random() * 360}, 100%, 50%)`,
-                    type: 'default'
-                };
+                particle.vx = (Math.random() - 0.5) * 5;
+                particle.vy = (Math.random() - 0.5) * 5;
+                particle.life = 1.0;
+                particle.maxLife = 1.0;
+                particle.size = Math.random() * 3 + 1;
+                particle.color = `hsl(${Math.random() * 360}, 100%, 50%)`;
+                particle.type = 'default';
         }
         
         particles.push(particle);
@@ -3211,6 +3528,8 @@ function updateParticles() {
         
         // 移除生命值为0的粒子
         if (particle.life <= 0) {
+            // 将粒子归还到对象池
+            returnObjectToPool('particles', particle);
             particles.splice(i, 1);
         }
     }
@@ -3295,9 +3614,36 @@ function drawLights() {
 function gameLoop(timestamp) {
     if (!gameRunning) return;
     
+    // 开始性能分析
+    startPerformanceAnalysis();
+    
     // 帧率控制
     if (!lastFrameTime) lastFrameTime = timestamp;
     const elapsed = timestamp - lastFrameTime;
+    
+    // 计算帧率
+    fpsFrameCount++;
+    if (!fpsUpdateTime) fpsUpdateTime = timestamp;
+    if (timestamp - fpsUpdateTime >= 1000) {
+        fps = fpsFrameCount;
+        fpsFrameCount = 0;
+        fpsUpdateTime = timestamp;
+        // 更新帧率显示
+        const fpsElement = document.getElementById('fpsValue');
+        if (fpsElement) {
+            fpsElement.textContent = fps;
+            // 根据帧率改变颜色
+            if (fps >= 55) {
+                fpsElement.style.color = '#4caf50'; // 绿色 - 流畅
+            } else if (fps >= 30) {
+                fpsElement.style.color = '#ffc107'; // 黄色 - 一般
+            } else {
+                fpsElement.style.color = '#ff6b6b'; // 红色 - 卡顿
+            }
+        }
+        // 每秒输出一次性能报告
+        printPerformanceReport();
+    }
     
     // 只有当经过的时间大于或等于帧间隔时，才执行游戏逻辑
     if (elapsed >= frameInterval) {
@@ -4130,6 +4476,9 @@ function gameLoop(timestamp) {
     // 恢复画布状态
     ctx.restore();
     
+    // 结束性能分析
+    endPerformanceAnalysis();
+    
     } catch (error) {
         console.error('游戏循环错误:', error);
         // 显示错误信息到游戏界面
@@ -4358,6 +4707,10 @@ function lineSegmentsIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
 async function startGame() {
     console.log('startGame called');
     try {
+        // 预加载所有资源
+        console.log('预加载资源...');
+        await preloadAllResources();
+        
         // 确保武器配置加载完成
         if (Object.keys(WEAPON_CONFIG).length === 0) {
             console.log('等待武器配置加载...');
